@@ -1,7 +1,7 @@
 // Copyright 2026 The flyx Authors. SPDX-License-Identifier: Apache-2.0
 // Qwen3.5 from its model file: the layer math as block flags (attention with
 // an output gate, (1 + w) norms and partial rotary; GDN with a plain-weight
-// output norm; the DFlash2 and DSpine drafters with plain norms), and the two ways a file
+// output norm; the DFlash2, DFlash and DSpine drafters with plain norms), and the two ways a file
 // stores the same model:
 //   .flyx  the config in the header, tensors under the names
 //             python/convert writes ("target.L3.attn.q"), laid out for the
@@ -18,6 +18,7 @@
 #include <cmath>
 #include <stdexcept>
 
+#include "models/dflash2.h"
 #include "models/dspine.h"
 #include "models/gguf.h"
 #include "models/vision/preprocess.h"
@@ -58,9 +59,9 @@ struct Config {
   bool mrope_interleaved = false;
   int trained_ctx = 0;  // the context the model was made for (0: the file does not say)
   bool gguf = false;  // the file's names and layout (above)
-  bool mtp = false, dflash2 = false, dspine = false;  // the drafters the model has (one block drafter at most)
+  bool mtp = false, dflash2 = false, dflash = false, dspine = false;  // its drafters (one block drafter at most)
   int mtp_companion = -1;    // the companion (ModelFile::add) holding the MTP layer, -1: the model file
-  int draft_companion = -1;  // the companion holding the block drafter (DFlash2 or DSpine), -1: the model file
+  int draft_companion = -1;  // the companion holding the block drafter (DFlash2, DFlash, DSpine), -1: the model file
   json draft;                // the block drafter's config
   VisionCfg vision;          // optional Qwen3.5/3.8 vision encoder (from mmproj companion or .flyx)
 };
@@ -228,7 +229,7 @@ void read_gguf_mmproj(const json& h, int companion_idx, const Config& f, VisionC
 //   a clip/mmproj GGUF holding the Qwen3.5/3.8 vision encoder (mmproj-BF16.gguf);
 //   a GGUF of this architecture and width whose one MTP layer is the block after the model's (unsloth ships the
 //     27B's so), with a GGUF model: its other tensors (its own embedding and head) are not read, the model's are;
-//   a drafter file (python/convert --draft alone) holding a block drafter (DFlash2 or DSpine) made for a target of
+//   a drafter file (python/convert --draft alone) holding a block drafter (DFlash2, DFlash, DSpine) made for a target of
 //     this width and vocabulary (and layer count, when it names one), with a model of either format.
 void take_companions(const ModelFile& file, Config* f, bool load_vision) {
   for (int i = 0; i < file.companions(); ++i) {
@@ -249,22 +250,23 @@ void take_companions(const ModelFile& file, Config* f, bool load_vision) {
       f->mtp = true;
       f->mtp_companion = i;
     } else if (h.value("kind", "") == "drafter" && h.contains("draft") && h["draft"].is_object()) {
-      if (f->dflash2 || f->dspine) throw std::runtime_error(what + "the model has a block drafter already");
+      if (f->dflash2 || f->dflash || f->dspine) throw std::runtime_error(what + "the model has a block drafter already");
       const json& d = h["draft"];
       const json t = d.value("target", json::object());
       const std::string kind = d.value("kind", "");
-      if ((kind != "dflash2" && kind != "dspine") || t.value("hidden", f->hidden) != f->hidden ||
+      if ((kind != "dflash2" && kind != "dflash" && kind != "dspine") || t.value("hidden", f->hidden) != f->hidden ||
           t.value("vocab", f->vocab) != f->vocab ||
           (t.contains("layers") && !t["layers"].is_null() && t["layers"].get<int>() != f->layers))
         throw std::runtime_error(what + "a drafter made for another model (this one: width " +
                                  std::to_string(f->hidden) + ", vocabulary " + std::to_string(f->vocab) + ", " +
                                  std::to_string(f->layers) + " layers)");
-      (kind == "dspine" ? f->dspine : f->dflash2) = true;
+      (kind == "dspine" ? f->dspine : kind == "dflash" ? f->dflash : f->dflash2) = true;
       f->draft_companion = i;
       f->draft = d;
     } else {
       throw std::runtime_error(what + "holds no drafter or vision encoder this model takes (a GGUF MTP "
-                                      "layer, a DFlash2 or DSpine drafter file, a vision projector)");
+                                      "layer, a DFlash2, DFlash or DSpine drafter file, a vision "
+                                      "projector)");
     }
   }
 }
@@ -275,7 +277,8 @@ Config read_config(const json& h) {
   f.mtp = h.contains("mtp") && !h["mtp"].is_null();
   if (h.contains("draft") && !h["draft"].is_null()) {
     f.draft = h["draft"];
-    (f.draft.value("kind", "dflash2") == "dspine" ? f.dspine : f.dflash2) = true;
+    const std::string kind = f.draft.value("kind", "dflash2");
+    (kind == "dspine" ? f.dspine : kind == "dflash" ? f.dflash : f.dflash2) = true;
   }
   f.hidden = c.at("hidden");
   f.layers = c.at("layers");
@@ -327,9 +330,8 @@ class Qwen35 final : public Model {
   int attention(const std::string& p, const Config& c, bool draft);
   int gdn(const std::string& p, const Config& c);
   int mlp(const std::string& p, const Config& c);
-  int dflash2(const json& d, const Config& c);
   void build_vision(const ModelFile& file, const Config& c);
-  int describe_dspine(const json& d, const Config& c);
+  int describe_block_drafter(const json& d, const Config& c);  // DFlash2, DFlash or DSpine
   void add_layers(std::vector<flyx_node>* p) const;
   void add_contexts(std::vector<flyx_node>* p) const;  // every drafter takes the pass's rows
 
@@ -345,7 +347,7 @@ class Qwen35 final : public Model {
   bool gguf_ = false;
   int mtp_companion_ = -1, draft_companion_ = -1;
   int layers_ = 0;
-  int embed_ = -1, head_ = -1, block_drafter_ = -1;  // the DFlash2 or DSpine block
+  int embed_ = -1, head_ = -1, block_drafter_ = -1;  // the DFlash2, DFlash or DSpine block
   std::vector<int> mixer_, mlp_;
   std::vector<int> taps_;  // the block drafter's features: the residual stream after taps_[s] layers
 };
@@ -399,121 +401,16 @@ int Qwen35::mlp(const std::string& p, const Config& c) {
   return tables_.mlp_block(p, c.hidden, c.inter, one(), c.eps, name_fn());
 }
 
-// Parse and validate DFlash2 drafter config before binding any tensors so mismatched hidden sizes
-// (which share the target's embed/head) and 32-bit dimension-product overflows are always refused early.
-struct DFlash2Spec {
-  flyx_dflash2_block block{};
-  int layers = 0;
-  int tg2 = 0;
-  double eps = 0.0;
-  std::vector<int> taps;
-};
-
-int req_int(const json& j, const char* key) {
-  const int64_t v = j.at(key).get<int64_t>();
-  if (v < INT_MIN || v > INT_MAX) throw std::runtime_error("invalid DFlash2 drafter config");
-  return int(v);
-}
-
-DFlash2Spec parse_dflash2_spec(const json& j, const Config& c) {
-  DFlash2Spec spec{};
-  flyx_dflash2_block& d = spec.block;
-  d.hidden = req_int(j, "hidden");
-  spec.layers = req_int(j, "layers");
-  d.n_heads = req_int(j, "n_heads");
-  d.n_kv = req_int(j, "n_kv");
-  d.head_dim = req_int(j, "head_dim");
-  d.inter = req_int(j, "inter");
-  d.block = req_int(j, "block");
-  d.mask_token = req_int(j, "mask_token");
-  const auto raw_taps = j.at("taps").get<std::vector<int64_t>>();
-  spec.taps.reserve(raw_taps.size());
-  for (int64_t t : raw_taps) {
-    if (t < 1 || t > c.layers) throw std::runtime_error("DFlash2 tap after layer " + std::to_string(t));
-    spec.taps.push_back(int(t));
+int Qwen35::describe_block_drafter(const json& j, const Config& c) {
+  const auto name = [this](const std::string& tensor) { return dn(tensor); };
+  if (c.dspine) {
+    const dspine::Target t{c.hidden, c.vocab, c.layers, embed_, head_};
+    taps_ = dspine::taps(j, t);
+    return dspine::describe(tables_, j, t, name);
   }
-  d.conv_taps = req_int(j, "conv_taps");
-  d.conv_group = req_int(j, "conv_group");
-  d.sel_rank = req_int(j, "sel_rank");
-  d.sel_topk = req_int(j, "sel_topk");
-  d.theta = j.at("rope_theta");
-  const int64_t win = j.value("window", int64_t(0));
-  if (win < 0 || win > INT_MAX) throw std::runtime_error("DFlash2 window out of range");
-  d.window = int32_t(win);
-  spec.eps = j.at("eps");
-  if (d.block < 2 || d.block > FLYX_MAX_ROWS)
-    throw std::runtime_error("DFlash2 block size outside 2.." + std::to_string(FLYX_MAX_ROWS));
-  if (d.hidden != c.hidden) throw std::runtime_error("DFlash2 hidden size does not match target");
-  if (d.hidden <= 0 || spec.layers <= 0 || d.n_heads <= 0 || d.n_kv <= 0 || d.head_dim <= 0 || d.head_dim % 2 != 0 ||
-      d.inter <= 0 || d.n_heads % d.n_kv != 0 || d.conv_taps <= 0 || d.sel_rank <= 0 || d.sel_rank > kMaxWidth ||
-      d.sel_topk <= 0 || d.sel_topk > c.vocab || d.mask_token < 0 || d.mask_token >= c.vocab || !(spec.eps > 0) ||
-      !(d.theta > 0) || d.hidden > kMaxWidth || d.inter > kMaxWidth || spec.layers > kMaxLayers ||
-      d.n_heads > kMaxHeads || d.head_dim > kMaxHeadDim || d.conv_taps > kMaxHeadDim || spec.taps.empty() ||
-      spec.taps.size() > size_t(INT_MAX))
-    throw std::runtime_error("invalid DFlash2 drafter config");
-  d.n_taps = int32_t(spec.taps.size());
-  if (d.conv_group < 1 || d.hidden % d.conv_group) throw std::runtime_error("DFlash2 conv group does not divide hidden");
-  const int64_t tg2 = int64_t(2) * d.conv_taps * (d.hidden / d.conv_group);
-  const int64_t tap_width = int64_t(d.n_taps) * c.hidden;
-  const int64_t ctx_width = int64_t(2) * spec.layers * d.n_kv * d.head_dim;
-  if (tg2 > INT_MAX || tap_width > INT_MAX || ctx_width > INT_MAX)
-    throw std::runtime_error("invalid DFlash2 drafter config");
-  spec.tg2 = int(tg2);
-  return spec;
-}
-
-int Qwen35::dflash2(const json& j, const Config& c) {
-  Tables& T = tables_;
-  DFlash2Spec spec = parse_dflash2_spec(j, c);
-  flyx_dflash2_block d = spec.block;
-  const int layers = spec.layers;
-  const double eps = spec.eps;
-  taps_ = std::move(spec.taps);
-  const int H = d.hidden, q = d.n_heads * d.head_dim, kv = d.n_kv * d.head_dim, I = d.inter;
-  const int TG2 = spec.tg2;
-  d.embed = embed_;
-  d.head = head_;
-  d.first_layer = int32_t(T.blocks.size());
-  d.layers = layers;
-  for (int l = 0; l < layers; ++l) {
-    const std::string p = dn("draft.L" + std::to_string(l) + ".");
-    flyx_block b{};
-    b.kind = FLYX_BLOCK_DFLASH2_LAYER;
-    auto& y = b.dflash2_layer;
-    y.norm = T.norm(p + "in_norm", H, 0.0, eps);
-    y.post_norm = T.norm(p + "post_norm", H, 0.0, eps);
-    y.q_norm = T.norm(p + "attn.q_norm", d.head_dim, 0.0, eps);
-    y.k_norm = T.norm(p + "attn.k_norm", d.head_dim, 0.0, eps);
-    y.q = T.weight(p + "attn.q", {q, H});
-    y.k = T.weight(p + "attn.k", {kv, H});
-    y.v = T.weight(p + "attn.v", {kv, H});
-    y.o = T.weight(p + "attn.o", {H, q});
-    y.gate = T.weight(p + "mlp.gate", {I, H});
-    y.up = T.weight(p + "mlp.up", {I, H});
-    y.down = T.weight(p + "mlp.down", {H, I});
-    y.attn_conv_proj = T.weight(p + "attn_conv.proj", {TG2, H});
-    y.attn_conv_base = T.weight(p + "attn_conv.base", {2, d.conv_taps, H});
-    y.mlp_conv_proj = T.weight(p + "mlp_conv.proj", {TG2, H});
-    y.mlp_conv_base = T.weight(p + "mlp_conv.base", {2, d.conv_taps, H});
-    T.block(b);
-  }
-  d.fc = T.weight(dn("draft.fc"), {H, int64_t(d.n_taps) * c.hidden});
-  d.hidden_norm = T.norm(dn("draft.hidden_norm"), H, 0.0, eps);
-  d.norm = T.norm(dn("draft.norm"), H, 0.0, eps);
-  d.sel_pred = T.weight(dn("draft.sel.pred"), {c.vocab, d.sel_rank});
-  d.sel_succ = T.weight(dn("draft.sel.succ"), {c.vocab, d.sel_rank});
-  d.sel_hid = T.weight(dn("draft.sel.hid"), {d.sel_rank, H});
-  flyx_state st{};
-  st.kind = FLYX_STATE_KV;
-  st.draft = 1;
-  st.layers = layers;
-  st.n_kv = d.n_kv;
-  st.head_dim = d.head_dim;
-  d.kv = T.state(st);
-  flyx_block b{};
-  b.kind = FLYX_BLOCK_DFLASH2;
-  b.dflash2 = d;
-  return T.block(b);
+  const dflash2::Target t{c.hidden, c.vocab, c.layers, embed_, head_};  // DFlash2 or DFlash
+  taps_ = dflash2::taps(j, t);
+  return dflash2::describe(tables_, j, t, name);
 }
 
 void Qwen35::build_vision(const ModelFile& file, const Config& c) {
@@ -639,12 +536,6 @@ void Qwen35::build_vision(const ModelFile& file, const Config& c) {
   set_vision(std::make_unique<vision::Qwen35VisionAdapter>(vp), std::move(vnodes));
 }
 
-int Qwen35::describe_dspine(const json& j, const Config& c) {
-  const dspine::Target t{c.hidden, c.vocab, c.layers, embed_, head_};
-  taps_ = dspine::taps(j, t);
-  return dspine::describe(tables_, j, t, [this](const std::string& name) { return dn(name); });
-}
-
 bool Qwen35::build(const ModelFile& file, const ModelOptions& o, std::string* err) {
   const json& h = file.header();
   Config c = GgufMeta::is(file) ? read_gguf_config(file) : read_config(h);
@@ -669,9 +560,11 @@ bool Qwen35::build(const ModelFile& file, const ModelOptions& o, std::string* er
   DrafterSources sources{c.mtp, c.dflash2, c.mtp_companion >= 0, c.dflash2 && c.draft_companion >= 0};
   sources.dspine = c.dspine;
   sources.dspine_beside = c.dspine && c.draft_companion >= 0;
+  sources.dflash = c.dflash;
+  sources.dflash_beside = c.dflash && c.draft_companion >= 0;
   if (!choose_drafters(o, sources, &drafters, err)) return false;
-  for (Drafter kind : drafters) {
-    if (kind == Drafter::kDFlash2) (void)parse_dflash2_spec(c.draft, c);
+  for (Drafter kind : drafters) {  // the block drafter's config checked before any tensor is bound
+    if (kind == Drafter::kDFlash2 || kind == Drafter::kDFlash) (void)dflash2::taps(c.draft, {c.hidden, c.vocab, c.layers});
     if (kind == Drafter::kDSpine) (void)dspine::taps(c.draft, {c.hidden, c.vocab, c.layers});
   }
   if (!tables_.set_activations(o.activations, declared_activations(file), o.fp4_inputs, err)) return false;
@@ -704,7 +597,7 @@ bool Qwen35::build(const ModelFile& file, const ModelOptions& o, std::string* er
       m.ring = T.state(ring);
       add_drafter(kind, T.block(b), FLYX_MAX_ROWS - 1);
     } else {
-      block_drafter_ = kind == Drafter::kDSpine ? describe_dspine(c.draft, c) : dflash2(c.draft, c);
+      block_drafter_ = describe_block_drafter(c.draft, c);
       add_drafter(kind, block_drafter_, c.draft.at("block").get<int>() - 1);
     }
   }

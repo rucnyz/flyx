@@ -230,6 +230,7 @@ std::vector<std::string> known_drafters(const std::vector<std::string>& base_mod
       {"Qwen/Qwen3.8-27B", "tencent/Qwen3.8-27B-DSpine-b16"},
       {"Qwen/Qwen3.5-4B", "vllm-project/Qwen3.5-4B-DFlash2"},
       {"Qwen/Qwen3-8B", "tencent/Qwen3-8B-DSpine-b16"},
+      {"Qwen/Qwen3-8B", "z-lab/Qwen3-8B-DFlash-b16"},
   };
   std::vector<std::string> out;
   for (const std::string& b : base_models)
@@ -300,8 +301,10 @@ bool fetch_model(const std::string& model, const std::vector<std::string>& draft
     bool given = block_given;
     for (const std::string& d : drafters) given = given || d.rfind(k, 0) == 0;
     if (given) continue;
-    const std::string kind = k.find("DSpine") != std::string::npos ? "dspine" : "dflash2";
-    out->notes.push_back(std::string("a ") + (kind == "dspine" ? "DSpine" : "DFlash2") +
+    const std::string kind = k.find("DSpine") != std::string::npos    ? "dspine"
+                             : k.find("DFlash2") != std::string::npos ? "dflash2"
+                                                                      : "dflash";
+    out->notes.push_back(std::string("a ") + (kind == "dspine" ? "DSpine" : kind == "dflash2" ? "DFlash2" : "DFlash") +
                          " drafter is published for this model: --drafter-file " + k);
     // Its size where the cache has it; the Hub is not asked for a suggestion.
     std::optional<uint64_t> size;

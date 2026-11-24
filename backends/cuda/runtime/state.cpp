@@ -803,7 +803,7 @@ void build_seq(flyx_bmodel* m, int32_t max_ctx, flyx_seq* s) {
     s->ci = s->alloc<int>(size_t(head_rows) * V);
   }
   if (d) {
-    // a wide block's rows; no convs (DSpine): G 0
+    // a wide block's rows; no convs (DSpine, DFlash): G 0
     const int B = std::max(d->block, FLYX_MAX_ROWS), DH = d->hidden, G = d->conv_group ? DH / d->conv_group : 0;
     s->ld_feats = n.feats;
     s->dtok = s->alloc<int>(B);
@@ -907,7 +907,7 @@ void alloc_batch(flyx_bmodel* m) {
       break;
     }
   if (d && !d->dspine && d->block > 0 && d->block * 2 <= FLYX_MAX_ROWS) {  // DSpine drafts a sequence at a time
-    const int DH = d->hidden, G = DH / d->conv_group;
+    const int DH = d->hidden, G = d->conv_group ? DH / d->conv_group : 0;  // DFlash: no convolutions
     auto af = [&](size_t count) { return static_cast<float*>(alloc(count * sizeof(float))); };
     B->dflash.dtok = static_cast<int*>(alloc(size_t(FLYX_MAX_ROWS) * sizeof(int)));
     B->dflash.dx = af(size_t(FLYX_MAX_ROWS) * DH);

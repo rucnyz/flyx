@@ -248,7 +248,11 @@ void draft_block(flyx_seq* s, const DFlashBlock& b, int width, const Launch& L, 
   // the drafter attends within its block both ways, at any count).  Trees keep the block they were made for.
   const int B = tree ? b.block : std::min(FLYX_MAX_ROWS, std::max(b.block, width + 1));
   const int H = b.hidden, nh = b.nh, nkv = b.nkv, hd = b.hd, I = b.inter;
-  const int Tp = b.conv_taps, G = H / b.conv_group, TG = Tp * G, nqkv = (nh + 2 * nkv) * hd;
+  // DFlash: no convolutions (each layer's attention and MLP add into the rows unwrapped) and no selector (each row's
+  // draft the head's best: the walk over one candidate).
+  const bool conv = b.conv_taps > 0, selector = b.sel_rank > 0;
+  if (tree && !selector) throw std::logic_error("cuda: DFlash drafts chains, not trees");  // lower refuses them
+  const int Tp = b.conv_taps, G = conv ? H / b.conv_group : 0, TG = Tp * G, nqkv = (nh + 2 * nkv) * hd;
   cudaStream_t st = L.st;
   build_rows(s->P, nullptr, b.mask_token, s->dtok, B, st);
   embed_tokens(E, s->dtok, s->dx, B, st);  // packed tables stay in host memory
@@ -257,31 +261,38 @@ void draft_block(flyx_seq* s, const DFlashBlock& b, int width, const Launch& L, 
     kv16* Kj = kv.k16(j);
     kv16* Vj = kv.v16(j);
     rmsnorm(s->dx, H, l.norm.w, l.norm.offset, l.norm.eps, s->dh, H, B, H, st);
-    gemm(s->dh, H, l.attn_proj, 2 * TG, H, s->ddelta, 2 * TG, B, false, L);
-    grouped_conv(s->dh, H, s->ddelta, 2 * TG, l.attn_base, H, Tp, b.conv_group, s->dhc, H, B, false, st);
-    gemm(s->dhc, H, l.w_qkv, nqkv, H, s->dproj, s->ld_dproj, B, false, L);
+    if (conv) {
+      gemm(s->dh, H, l.attn_proj, 2 * TG, H, s->ddelta, 2 * TG, B, false, L);
+      grouped_conv(s->dh, H, s->ddelta, 2 * TG, l.attn_base, H, Tp, b.conv_group, s->dhc, H, B, false, st);
+    }
+    gemm(conv ? s->dhc : s->dh, H, l.w_qkv, nqkv, H, s->dproj, s->ld_dproj, B, false, L);
     attn_prep(s->dproj, s->ld_dproj, 0, nh * hd, (nh + nkv) * hd, l.q_norm.w, l.k_norm.w, l.q_norm.offset,
               l.q_norm.eps, b.theta, hd, nh, nkv, hd, B, s->P, kPosPosition, false, s->dq, Kj, Vj, st);
     const bool split_o = fused && !l.w_o.q8_inputs() && (nh * hd) % 64 == 0;
     attention(s->dq, Kj, Vj, nh, nkv, hd, B, false, B, 1.f / std::sqrt(float(hd)), s->P, nullptr, 0,
               split_o ? nullptr : s->dact, s->ld_dact, s->own.part, kRoundSplits, L, 0, b.window);
-    if (split_o) gemm_presplit(l.w_o, H, nh * hd, s->dtmp, H, B, false, L);
-    else gemm(s->dact, s->ld_dact, l.w_o, H, nh * hd, s->dtmp, H, B, false, L);
-    grouped_conv(s->dtmp, H, s->ddelta + TG, 2 * TG, l.attn_base + size_t(Tp) * H, H, Tp, b.conv_group, s->dx, H, B,
-                 true, st);
+    float* o_out = conv ? s->dtmp : s->dx;  // without a conv the projection adds into the rows
+    if (split_o) gemm_presplit(l.w_o, H, nh * hd, o_out, H, B, !conv, L);
+    else gemm(s->dact, s->ld_dact, l.w_o, H, nh * hd, o_out, H, B, !conv, L);
+    if (conv)
+      grouped_conv(s->dtmp, H, s->ddelta + TG, 2 * TG, l.attn_base + size_t(Tp) * H, H, Tp, b.conv_group, s->dx, H, B,
+                   true, st);
     rmsnorm(s->dx, H, l.post_norm.w, l.post_norm.offset, l.post_norm.eps, s->dh, H, B, H, st);
-    gemm(s->dh, H, l.mlp_proj, 2 * TG, H, s->ddelta, 2 * TG, B, false, L);
-    grouped_conv(s->dh, H, s->ddelta, 2 * TG, l.mlp_base, H, Tp, b.conv_group, s->dhc, H, B, false, st);
-    gemm(s->dhc, H, l.w_gu, 2 * I, H, s->dproj, s->ld_dproj, B, false, L);
+    if (conv) {
+      gemm(s->dh, H, l.mlp_proj, 2 * TG, H, s->ddelta, 2 * TG, B, false, L);
+      grouped_conv(s->dh, H, s->ddelta, 2 * TG, l.mlp_base, H, Tp, b.conv_group, s->dhc, H, B, false, st);
+    }
+    gemm(conv ? s->dhc : s->dh, H, l.w_gu, 2 * I, H, s->dproj, s->ld_dproj, B, false, L);
     if (fused) {
       swiglu_split(s->dproj, s->ld_dproj, I, B, L, l.w_down.q8_inputs());
-      gemm_presplit(l.w_down, H, I, s->dtmp, H, B, false, L);
+      gemm_presplit(l.w_down, H, I, o_out, H, B, !conv, L);
     } else {
       swiglu(s->dproj, s->ld_dproj, I, s->dact, s->ld_dact, B, st);
-      gemm(s->dact, s->ld_dact, l.w_down, H, I, s->dtmp, H, B, false, L);
+      gemm(s->dact, s->ld_dact, l.w_down, H, I, o_out, H, B, !conv, L);
     }
-    grouped_conv(s->dtmp, H, s->ddelta + TG, 2 * TG, l.mlp_base + size_t(Tp) * H, H, Tp, b.conv_group, s->dx, H, B,
-                 true, st);
+    if (conv)
+      grouped_conv(s->dtmp, H, s->ddelta + TG, 2 * TG, l.mlp_base + size_t(Tp) * H, H, Tp, b.conv_group, s->dx, H, B,
+                   true, st);
   }
   // Rows 1..width predict tokens: unary top-k from the target head, then the
   // selector walk (or tree).  The block's layers above need all B rows (attention inside
@@ -289,7 +300,7 @@ void draft_block(flyx_seq* s, const DFlashBlock& b, int width, const Launch& L, 
   const int nr = std::min(width, B - 1);
   rmsnorm(s->dx + H, H, b.norm.w, b.norm.offset, b.norm.eps, s->dh, H, nr, H, st);
   draft_head_pick(head, s->dh, nr, b.sel_topk, s->cand, s->unary, s, L, s->draft_prob, s->draft_margin);
-  gemm(s->dh, H, b.sel_hid, b.sel_rank, H, s->hid, b.sel_rank, nr, false, L);
+  if (selector) gemm(s->dh, H, b.sel_hid, b.sel_rank, H, s->hid, b.sel_rank, nr, false, L);
   if (tree)
     selector_tree(s->P, s->cand, s->unary, b.sel_topk, s->hid, b.sel_rank, b.sel_pred, b.sel_succ, width, nr,
                   s->oracle, s->drafts, s->tree, st);

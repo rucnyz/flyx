@@ -28,10 +28,10 @@ using interfaces::ModelOptions;
 
 // The drafters the architectures here can have.  Only models/ knows them by
 // name: the engine sees drafters by number and the round widths each offers
-// (draft_widths).  DFlash2 and DSpine (models/dspine.h) draft a block at once;
+// (draft_widths).  DFlash2 and DFlash (models/dflash2.h) and DSpine (models/dspine.h) draft a block at once;
 // DV (models/dv.h) drafts trees, and its canvas follows its own rounds only
 // (Model::restarts).
-enum class Drafter { kNone, kMtp, kDFlash2, kDSpine, kDv };
+enum class Drafter { kNone, kMtp, kDFlash2, kDSpine, kDv, kDFlash };
 const char* drafter_name(Drafter d);
 
 // What a .flyx file says of its NVFP4 weights' inputs ("quant": {"activations": ...}; "" if nothing).
@@ -43,6 +43,7 @@ struct DrafterSources {
   bool mtp_beside = false, dflash2_beside = false;  // ... from a drafter file
   bool dv = false;                                  // the model file has a DV drafter
   bool dspine = false, dspine_beside = false;       // a DSpine drafter (where a DFlash2 one would be)
+  bool dflash = false, dflash_beside = false;       // a DFlash drafter (likewise)
 };
 
 // The drafters a model holds, the MTP layer first: the one

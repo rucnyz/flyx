@@ -91,7 +91,7 @@ bool engine_flag(const std::string& a, const std::function<std::string()>& value
     const std::string v = value();
     interfaces::DrafterMode mode;
     if (!interfaces::parse_drafter_mode(v, &mode))
-      std::fprintf(stderr, "error: unknown drafter '%s' (mtp, dflash2, dspine, dv, all or none)\n", v.c_str()),
+      std::fprintf(stderr, "error: unknown drafter '%s' (mtp, dflash2, dflash, dspine, dv, all or none)\n", v.c_str()),
           std::exit(2);
     eo->drafter = v;
   } else if (a == "--drafter-file") {
@@ -162,8 +162,8 @@ std::string engine_flags_help(int ctx) {
          "  --no-lookup          no rounds drafted from the text itself where it repeats\n"
          "  --draft-trees        the drafter also drafts trees (DFlash2: its candidates, best first), chosen per\n"
          "                       round by cost and acceptance like its chains (also FLYX_DRAFT_TREES=1)\n"
-         "  --drafter D          mtp | dflash2 | dspine | dv | all | none; with several, the drafter is chosen every\n"
-         "                       round\n"
+         "  --drafter D          mtp | dflash2 | dflash | dspine | dv | all | none; with several, the drafter is\n"
+         "                       chosen every round\n"
          "                       (default: every drafter given in a file of its own, and the model file's MTP layer\n"
          "                       if it has one, else its DFlash2 drafter; its DV drafter, which drafts alone, only\n"
          "                       when named)\n"

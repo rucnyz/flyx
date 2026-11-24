@@ -11,7 +11,7 @@
 // canvas runs this model's own attention and MLP blocks, and a .flyx file of
 // either may hold the target's own adapters (a V-LoRA, python/convert --lora:
 // the header's "lora" section), on every linear of every layer, in every pass.
-// A Qwen3 model takes a DSpine drafter (models/dspine.h): in its .flyx file
+// A Qwen3 model takes a DFlash or DSpine drafter (models/dflash2.h, models/dspine.h): in its .flyx file
 // (python/convert --draft) or in a drafter file beside a model of either format.
 #include "models/llama/llama.h"
 
@@ -19,6 +19,7 @@
 #include <cmath>
 #include <stdexcept>
 
+#include "models/dflash2.h"
 #include "models/dspine.h"
 #include "models/dv.h"
 #include "models/gguf.h"
@@ -130,13 +131,13 @@ class Llama final : public Model {
   int embed_ = -1, head_ = -1;
   std::vector<int> layers_;  // per layer: attention block, MLP block
   int dv_block_ = -1;        // DV, when it drafts
-  int dspine_block_ = -1;    // DSpine, when it drafts
+  int block_drafter_ = -1;   // DFlash or DSpine, when it drafts
   std::vector<int> taps_;    // its features: the residual stream after taps_[s] layers
 };
 
 // The drafter config a Qwen3 model takes from its file ("draft") or a drafter file beside it (ModelFile::add), and
 // the companion that holds it (-1: the model file); null when there is none.  Throws on one it does not take.
-const json* dspine_config(const ModelFile& file, bool qwen3, int* companion) {
+const json* block_drafter_config(const ModelFile& file, bool qwen3, int* companion) {
   const json& h = file.header();
   *companion = -1;
   const json* found = nullptr;
@@ -145,21 +146,21 @@ const json* dspine_config(const ModelFile& file, bool qwen3, int* companion) {
     const json& c = h.at("companions").at(size_t(i));
     const std::string what = "drafter file " + std::to_string(i + 1) + ": ";
     if (c.value("kind", "") != "drafter" || !c.contains("draft") || !c["draft"].is_object())
-      throw std::runtime_error(what + "holds no drafter this model takes (a DSpine drafter file)");
+      throw std::runtime_error(what + "holds no drafter this model takes (a DFlash or DSpine drafter file)");
     if (found) throw std::runtime_error(what + "the model has a block drafter already");
     found = &c["draft"];
     *companion = i;
   }
-  if (found && (!qwen3 || found->value("kind", "") != "dspine"))
-    throw std::runtime_error(std::string("a ") + (qwen3 ? "Qwen3" : "Llama") + " model takes no " +
-                             found->value("kind", std::string("unknown")) + " drafter" +
-                             (qwen3 ? " (a DSpine drafter: python/convert --draft)" : ""));
+  const std::string kind = found ? found->value("kind", std::string("unknown")) : "";
+  if (found && (!qwen3 || (kind != "dspine" && kind != "dflash")))
+    throw std::runtime_error(std::string("a ") + (qwen3 ? "Qwen3" : "Llama") + " model takes no " + kind + " drafter" +
+                             (qwen3 ? " (a DFlash or DSpine drafter: python/convert --draft)" : ""));
   return found;
 }
 
 bool Llama::build(const ModelFile& file, const ModelOptions& o, std::string* err) {
   const bool qwen3 = file.arch() == "qwen3", qk_norm = qwen3;  // Qwen3 normalises each head's q and k
-  // DV: in a Llama .flyx file of its own (python/convert --dv); DSpine: beside a Qwen3 (dspine_config).
+  // DV: in a Llama .flyx file of its own (python/convert --dv); DFlash or DSpine: with a Qwen3 (block_drafter_config).
   const bool has_dv = dv::in_file(file);
   if (has_dv && (qwen3 || GgufMeta::is(file))) return *err = "a DV drafter in a file that is not a Llama .flyx", false;
   file_drafts_trees_ = has_dv;
@@ -172,14 +173,17 @@ bool Llama::build(const ModelFile& file, const ModelOptions& o, std::string* err
   int companion = -1;
   const json* draft = nullptr;
   try {
-    draft = dspine_config(file, qwen3, &companion);
+    draft = block_drafter_config(file, qwen3, &companion);
   } catch (const std::exception& e) {
     return *err = e.what(), false;
   }
   DrafterSources sources;
   sources.dv = has_dv;
-  sources.dspine = draft != nullptr;
-  sources.dspine_beside = companion >= 0;
+  const bool dflash = draft && draft->value("kind", "") == "dflash";
+  sources.dspine = draft && !dflash;
+  sources.dspine_beside = sources.dspine && companion >= 0;
+  sources.dflash = dflash;
+  sources.dflash_beside = dflash && companion >= 0;
   std::vector<Drafter> drafters;
   if (!choose_drafters(o, sources, &drafters, err)) return false;
   if (!tables_.set_activations(o.activations, declared_activations(file), o.fp4_inputs, err)) return false;
@@ -239,13 +243,20 @@ bool Llama::build(const ModelFile& file, const ModelOptions& o, std::string* err
     }
   }
   for (Drafter kind : drafters) {
-    if (kind != Drafter::kDSpine) continue;
-    const dspine::Target t{H, V, layers, embed_, head_};
-    taps_ = dspine::taps(*draft, t);
-    dspine_block_ = dspine::describe(T, *draft, t, [&](const std::string& name) {
-      return companion >= 0 ? ModelFile::companion_name(companion, name) : name;
-    });
-    add_drafter(kind, dspine_block_, draft->at("block").get<int>() - 1);
+    if (kind != Drafter::kDSpine && kind != Drafter::kDFlash) continue;
+    const auto name = [&](const std::string& tensor) {
+      return companion >= 0 ? ModelFile::companion_name(companion, tensor) : tensor;
+    };
+    if (kind == Drafter::kDSpine) {
+      const dspine::Target t{H, V, layers, embed_, head_};
+      taps_ = dspine::taps(*draft, t);
+      block_drafter_ = dspine::describe(T, *draft, t, name);
+    } else {
+      const dflash2::Target t{H, V, layers, embed_, head_};
+      taps_ = dflash2::taps(*draft, t);
+      block_drafter_ = dflash2::describe(T, *draft, t, name);
+    }
+    add_drafter(kind, block_drafter_, draft->at("block").get<int>() - 1);
   }
   if (std::find(drafters.begin(), drafters.end(), Drafter::kDv) != drafters.end()) {  // DV
     dv::Target t;
@@ -273,9 +284,9 @@ bool Llama::build(const ModelFile& file, const ModelOptions& o, std::string* err
 void Llama::add_layers(std::vector<flyx_node>* p) const {
   for (size_t i = 0; i < layers_.size(); ++i) {
     p->push_back({FLYX_NODE_RUN, layers_[i], 0, 0});
-    if (dspine_block_ >= 0 && i % 2 == 1)
+    if (block_drafter_ >= 0 && i % 2 == 1)
       for (size_t s = 0; s < taps_.size(); ++s)
-        if (taps_[s] == int(i / 2) + 1) p->push_back({FLYX_NODE_TAP, dspine_block_, int32_t(s), 0});
+        if (taps_[s] == int(i / 2) + 1) p->push_back({FLYX_NODE_TAP, block_drafter_, int32_t(s), 0});
   }
 }
 
@@ -283,7 +294,7 @@ std::vector<flyx_node> Llama::prefill_program() const {
   std::vector<flyx_node> p;
   p.push_back({FLYX_NODE_RUN, embed_, 0, 0});
   add_layers(&p);
-  if (dspine_block_ >= 0) p.push_back({FLYX_NODE_CONTEXT, dspine_block_, 0, 0});
+  if (block_drafter_ >= 0) p.push_back({FLYX_NODE_CONTEXT, block_drafter_, 0, 0});
   p.push_back({FLYX_NODE_RUN, head_, 1, 0});
   if (dv_block_ >= 0) p.push_back({FLYX_NODE_CONTEXT, dv_block_, 0, 0});  // DV's canvas starts over
   return p;
@@ -305,7 +316,7 @@ std::vector<flyx_node> Llama::round_program(int width, int d, bool given) const 
   p.insert(p.end(), verify.begin(), verify.end());
   p.push_back({FLYX_NODE_ACCEPT, -1, width, 0});
   p.push_back({FLYX_NODE_COMMIT, -1, 0, 0});
-  if (dspine_block_ >= 0) p.push_back({FLYX_NODE_CONTEXT, dspine_block_, 0, 0});
+  if (block_drafter_ >= 0) p.push_back({FLYX_NODE_CONTEXT, block_drafter_, 0, 0});
   return p;
 }
 

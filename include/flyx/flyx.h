@@ -51,7 +51,7 @@ typedef struct {
   const char* backend_dir;  /* where backend libraries live; NULL = next to the executable */
   int32_t speculative;      /* use the model's drafters (default 1) */
   int32_t verbose;
-  const char* drafter;      /* "mtp" | "dflash2" | "dspine" | "dv" | "all" (chosen every round) | "none" | NULL =
+  const char* drafter;      /* "mtp" | "dflash2" | "dflash" | "dspine" | "dv" | "all" (chosen every round) | "none" | NULL =
                                the drafter files' drafters and the model file's MTP layer, else its block drafter
                                (DFlash2 or DSpine); its DV
                                drafter only when named ("dv", "all").  DV (a Llama file converted
