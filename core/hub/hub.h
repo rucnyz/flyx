@@ -116,7 +116,7 @@ bool split_gguf_name(const std::string& file_name);
 std::string quant_in_name(const std::string& file_name);
 
 // Whether the repository holds a block drafter, not a transformers model; and which, from its config's architectures
-// (DFlash2DraftModel: "dflash2", DSpineDraftModel: "dspine"; "" none).
+// (DFlash2DraftModel: "dflash2", DFlashDraftModel: "dflash", DSpineDraftModel: "dspine"; "" none).
 bool is_drafter(const Repo& r);
 std::string drafter_kind(const Repo& r);
 std::string drafter_kind(const std::vector<std::string>& architectures);

@@ -483,7 +483,7 @@ void quantize_mtp_weights(flyx_bmodel* m) {
                  double(int64_t(m->bytes) - int64_t(before)) / 1e9);
 }
 
-// Shared block-drafter weight policy (DFlash2 and DSpine), leaving already-quantized block drafters intact
+// Shared block-drafter weight policy (DFlash2, DFlash and DSpine), leaving already-quantized block drafters intact
 // (draft_weights=exact keeps them as the file has them): BF16 projections to NVFP4 beside an NVFP4 target (drafted
 // against a BF16 target NVFP4 lost 9% acceptance, -2.6% overall; NVFP4 target +9.6%), to Q8_0 beside GGML block weights
 // (the 27B's drafter reads 3.3 GB of bf16 a round), and beside a BF16 target to Q8_0, DSpine's to NVFP4.  Qwen3-8B's

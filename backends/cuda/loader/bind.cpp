@@ -244,10 +244,12 @@ DFlashLayer dflash_layer(WeightLoader& L, const flyx_dflash2_layer_block& b) {
   l.w_o = L.lin(b.o);
   l.w_gu = L.lin_stack({b.gate, b.up});
   l.w_down = L.lin(b.down);
-  l.attn_proj = L.lin(b.attn_conv_proj);
-  l.mlp_proj = L.lin(b.mlp_conv_proj);
-  l.attn_base = L.vec(b.attn_conv_base);
-  l.mlp_base = L.vec(b.mlp_conv_base);
+  if (b.attn_conv_proj >= 0) {  // DFlash: no convolutions (weights -1)
+    l.attn_proj = L.lin(b.attn_conv_proj);
+    l.mlp_proj = L.lin(b.mlp_conv_proj);
+    l.attn_base = L.vec(b.attn_conv_base);
+    l.mlp_base = L.vec(b.mlp_conv_base);
+  }
   return l;
 }
 
@@ -277,9 +279,13 @@ DFlashBlock dflash(WeightLoader& L, const flyx_model_desc& d, const flyx_dflash2
   f.fc = L.lin(b.fc);
   f.hidden_norm = norm(L, b.hidden_norm);
   f.norm = norm(L, b.norm);
-  f.sel_pred = L.mat(b.sel_pred);
-  f.sel_succ = L.mat(b.sel_succ);
-  f.sel_hid = L.lin(b.sel_hid);
+  expect((b.conv_taps > 0) == (b.conv_group > 0) && (b.sel_rank > 0 || b.sel_topk == 1),
+         "DFlash2's convolutions and selector: both sizes or neither (DFlash: sel_topk 1)");
+  if (b.sel_rank > 0) {  // DFlash: no selector (weights -1), each row's draft the head's best
+    f.sel_pred = L.mat(b.sel_pred);
+    f.sel_succ = L.mat(b.sel_succ);
+    f.sel_hid = L.lin(b.sel_hid);
+  }
   // Context K/V projections of every layer in one GEMM, their k norms side by side.
   std::vector<int> ctx, kn;
   double eps = 0;

@@ -2,8 +2,8 @@
 // A block drafter read from its authors' directory (config.json and safetensors) is what
 // python/convert makes of it as a drafter file: the same "draft" description and the same tensors, byte for byte.
 // The tiny assets hold the drafter as z-lab publishes it (hf_draft_zlab), with a sliding window (hf_draft_window)
-// and in speculators' layout (hf_draft), and python/convert's files of the first two; and a DSpine drafter as
-// tencent publishes it (hf_dspine) with python/convert's file of it.
+// and in speculators' layout (hf_draft), and python/convert's files of the first two; a DSpine drafter as tencent
+// publishes it (hf_dspine) and a DFlash drafter as z-lab publishes it (hf_dflash), with python/convert's files of them.
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -67,6 +67,7 @@ int main(int argc, char** argv) {
   same(dir, model, "hf_draft", "tiny_draft.flyx", false);  // speculators' layout: the same drafter
   same(dir, model, "hf_dspine", "tiny_draft_dspine.flyx");   // DSpine, its stacked bridge tensors cut per layer
   same(dir, model, "hf_dspine1", "tiny_draft_dspine1.flyx");  // one layer: no early reads ([0, code, hidden])
+  same(dir, model, "hf_dflash", "tiny_draft_dflash.flyx");    // DFlash: DFlash2's layers, no convolutions or selector
   {
     flyx::ModelFile f;
     std::string err;

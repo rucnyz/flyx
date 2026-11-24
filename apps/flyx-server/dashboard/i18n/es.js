@@ -327,6 +327,7 @@ export default {
     "Add to settings": "Añadir a los ajustes",
     "A DFlash2 drafter is published for this model.": "Hay un drafter DFlash2 publicado para este modelo.",
     "A DSpine drafter is published for this model.": "Hay un drafter DSpine publicado para este modelo.",
+    "A DFlash drafter is published for this model.": "Hay un drafter DFlash publicado para este modelo.",
     "It often adds speed on top of MTP:": "Suele sumar velocidad a la de MTP:",
     "Looked in the Hugging Face cache": "Se buscó en la caché de Hugging Face",
     "(the default)": "(predeterminada)",

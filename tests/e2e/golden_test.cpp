@@ -40,9 +40,9 @@ using json = nlohmann::json;
 namespace {
 
 int g_fail = 0;
-// The block drafter the tiny model holds (its golden file's "block_drafter"): DFlash2, or DSpine in place of it.
+// The tiny model's block drafter (its golden file's "block_drafter"): DFlash2, or DFlash or DSpine in its place.
 std::string g_block = "dflash2";
-std::string block_label() { return g_block == "dspine" ? "DSpine" : "DFlash2"; }
+std::string block_label() { return g_block == "dspine" ? "DSpine" : g_block == "dflash" ? "DFlash" : "DFlash2"; }
 
 void check(bool ok, const std::string& what) {
   std::printf("  %-4s %s\n", ok ? "ok" : "FAIL", what.c_str());
@@ -3823,7 +3823,7 @@ int main(int argc, char** argv) {
             "relaxed acceptance, min-p 1e-37: more drafts accepted (MTP " + std::to_string(loose_m) + " against " +
                 std::to_string(exact_m) + ", DFlash2 " + std::to_string(loose_d) + " against " +
                 std::to_string(exact_d) + ")");
-      if (g_block == "dflash2") drafted_trees(model, backend, prompt, want, oracle);  // DSpine drafts chains only
+      if (g_block == "dflash2") drafted_trees(model, backend, prompt, want, oracle);  // DFlash, DSpine: chains only
     }
 
     // MTP drafter: same tokens; drafts equal to the reference's; state kept

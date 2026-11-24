@@ -571,6 +571,17 @@ void test_select() {
   }
   std::printf("  %-4s candidate walk\n", drafts == want ? "ok" : "FAIL");
   g_fail += drafts != want;
+  {  // DFlash's walk: no selector (one candidate a row, rank 0, no pred, succ or hid), each row's draft its best
+    std::vector<int> best(width);
+    Vec unary1(width);
+    for (int s = 0; s < width; ++s) best[s] = want_idx[s * k], unary1[s] = want_val[s * k];
+    int* cand1 = dev<int>(width);
+    CK(cudaMemcpy(cand1, best.data(), width * sizeof(int), cudaMemcpyHostToDevice));
+    selector_walk(P, cand1, up(unary1), 1, nullptr, 0, nullptr, nullptr, width, nullptr, dr, 0);
+    const bool ok = down_i(dr, width) == best;
+    std::printf("  %-4s candidate walk of one candidate, rank 0 (DFlash)\n", ok ? "ok" : "FAIL");
+    g_fail += !ok;
+  }
   // The candidates as a tree (ops/draft/ref.h): drafts, parents, and the TreeRows the round reads; its trunk is the
   // walk's chain.  A tree wider than the positions (it must branch), one that fills a whole round, and one of 5 over
   // 2 positions.

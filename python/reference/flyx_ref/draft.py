@@ -12,6 +12,10 @@ token-conditioned grouped causal convolutions around attention and MLP, and a
 low-rank candidate selector that re-ranks the unary top-k with a
 predecessor/hidden/successor bilinear score while walking the block left to
 right.
+
+DFlash (z-lab's DFlashDraftModel, what DFlash2 grew from) is this block with
+neither: conv_taps 0 (attention and MLP unwrapped) and sel_rank 0 (each row's
+draft the head's best, the lower id on ties).
 """
 from __future__ import annotations
 
@@ -103,6 +107,8 @@ class Draft:
 
     def _conv(self, name, x):
         c = self.cfg
+        if not c.conv_taps:  # DFlash: no convolutions
+            return x, None, None
         G = c.hidden // c.conv_group
         ker = (x @ self.w(name + ".proj").T).view(x.shape[0], 2, c.conv_taps, G)
         base = self.w(name + ".base")                       # [2, taps, H]
@@ -130,16 +136,20 @@ class Draft:
             k = rope(k, pos, c.rope_theta, c.head_dim)
             K = torch.cat([st.k[j], k]); V = torch.cat([st.v[j], v])   # bidirectional (within the window)
             o = attention(q, K, V, scale, mask).reshape(B, -1) @ self.w(p + "attn.o").T
-            o = grouped_conv(o, ker, base, B, c.conv_group)
+            if ker is not None:
+                o = grouped_conv(o, ker, base, B, c.conv_group)
             x = r + o
             r = x
             h = rms_norm(x, self.w(p + "post_norm"), c.eps)
             h, ker, base = self._conv(p + "mlp_conv", h)
             m = (torch.nn.functional.silu(h @ self.w(p + "mlp.gate").T) * (h @ self.w(p + "mlp.up").T)) @ self.w(p + "mlp.down").T
-            x = r + grouped_conv(m, ker, base, B, c.conv_group)
+            x = r + (grouped_conv(m, ker, base, B, c.conv_group) if ker is not None else m)
         hn = rms_norm(x, self.w("norm"), c.eps)[1:]          # rows that predict tokens
         logits = hn @ self.head.T
         unary, cand = torch.topk(logits, c.sel_topk, dim=-1)  # sorted, ties -> lower id first
+        if not c.sel_rank:  # DFlash: each row's best
+            best = torch.argmax(logits, dim=-1)                # the first (lowest id) of equal bests
+            return [int(t) for t in best], {"cand": cand, "unary": unary, "scores": unary, "hidden": hn}
         hid = hn @ self.w("sel.hid").T                         # [B-1, rank]
         pred, succ = self.w("sel.pred"), self.w("sel.succ")
         prev, drafts, scores = anchor, [], []

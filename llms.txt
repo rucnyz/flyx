@@ -1,6 +1,6 @@
 # flyx
 
-> Low-latency local LLM and multimodal VLM inference engine for single-user NVIDIA GPUs (CUDA 13, C++/CUDA, Apache-2.0) with bitwise-exact speculative decoding (MTP, DFlash2, DSpine, DV, prompt lookup), native GGUF and `.flyx` support, companion `mmproj` vision encoding with disk/host/GPU weight placement, tiered GPU/RAM/disk long-context KV caches with 2-bit StrataFlux attention, and OpenAI / Anthropic HTTP APIs.
+> Low-latency local LLM and multimodal VLM inference engine for single-user NVIDIA GPUs (CUDA 13, C++/CUDA, Apache-2.0) with bitwise-exact speculative decoding (MTP, DFlash2, DFlash, DSpine, DV, prompt lookup), native GGUF and `.flyx` support, companion `mmproj` vision encoding with disk/host/GPU weight placement, tiered GPU/RAM/disk long-context KV caches with 2-bit StrataFlux attention, and OpenAI / Anthropic HTTP APIs.
 
 Start here when deploying, integrating, or modifying `flyx`. Each document below is the single source of truth for its domain.
 
@@ -19,7 +19,7 @@ Start here when deploying, integrating, or modifying `flyx`. Each document below
 - [README.md](README.md): Project overview, 30-second quick start, supported hardware/model summary, headline decode throughput.
 - Localized READMEs mirroring `README.md`: [docs/i18n/README_zh.md](docs/i18n/README_zh.md) (Chinese), [docs/i18n/README_ja.md](docs/i18n/README_ja.md) (Japanese), [docs/i18n/README_ko.md](docs/i18n/README_ko.md) (Korean), [docs/i18n/README_es.md](docs/i18n/README_es.md) (Spanish), [docs/i18n/README_fr.md](docs/i18n/README_fr.md) (French), [docs/i18n/README_de.md](docs/i18n/README_de.md) (German).
 - [docs/server.md](docs/server.md): Complete CLI flags and defaults, environment variables, `--backend-opt` keys, OpenAI/Anthropic/management HTTP endpoints and schemas, error codes, coding-agent integration, and C/Python API usage. Read this before running `flyx serve`, calling HTTP endpoints, or passing engine/backend options.
-- [docs/models.md](docs/models.md): Supported architectures (Qwen3.5/3.8, Qwen3, Llama such as MiniCPM5-1B), GGUF and `.flyx` formats (format 2 for V-LoRA adapters), Hugging Face Hub resolution, MTP, DFlash2, DSpine and DV drafters, and long-context KV tiering + 2-bit StrataFlux sizing recipes for 16/24/32 GB GPUs. Read this when selecting a model, drafter, or long-context configuration.
+- [docs/models.md](docs/models.md): Supported architectures (Qwen3.5/3.8, Qwen3, Llama such as MiniCPM5-1B), GGUF and `.flyx` formats (format 2 for V-LoRA adapters), Hugging Face Hub resolution, MTP, DFlash2, DFlash, DSpine and DV drafters, and long-context KV tiering + 2-bit StrataFlux sizing recipes for 16/24/32 GB GPUs. Read this when selecting a model, drafter, or long-context configuration.
 - [docs/monitor.md](docs/monitor.md): `GET /v1/telemetry` schema (version 1), `flyx monitor` CLI, and built-in web dashboard (`/dashboard`, `--dashboard-dir`).
 - [docs/benchmarks.md](docs/benchmarks.md): Reproducible consumer-GPU long-context coding (`1K–256K`), `flyx bench` plain/MTP/DFlash2/DSpine throughput tables, and Needle-in-a-Haystack attention-fidelity verification with exact commands.
 

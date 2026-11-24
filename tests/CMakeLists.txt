@@ -390,6 +390,9 @@ flyx_add_golden_test(golden_cpu_ref_dspine1 ARGS cpu_ref dspine1)  # a drafter o
 flyx_add_golden_test(golden_cpu_ref_dspine_window ARGS cpu_ref dspine_window)
 # The tiny Qwen3 with a DSpine drafter (taps and context in a second architecture's programs): transformers' tokens.
 flyx_add_golden_test(golden_cpu_ref_qwen3_dspine ARGS cpu_ref qwen3 ${ASSETS}/tiny_qwen3_dspine.flyx)
+# DFlash (z-lab's DFlashDraftModel): DFlash2's block without convolutions or selector, in its place
+flyx_add_golden_test(golden_cpu_ref_dflash ARGS cpu_ref dflash)
+flyx_add_golden_test(golden_cpu_ref_qwen3_dflash ARGS cpu_ref qwen3 ${ASSETS}/tiny_qwen3_dflash.flyx)
 
 set_tests_properties(tokenizer tokenizer_minicpm5 chat chat_qwen35 reply_grammars request reply_text
                      scheduler_cpu_ref scheduler_queue scheduler_prewarmed_history scheduler_interrupted_prewarm
@@ -501,6 +504,9 @@ if(TARGET flyx-cuda)
   flyx_add_golden_test(golden_cuda_dspine_window ARGS cuda dspine_window)
   flyx_add_golden_test(golden_cuda_dspine1 ARGS cuda dspine1)  # one layer: its cache binary16 beside fp8 ones
   flyx_add_golden_test(golden_cuda_qwen3_dspine ARGS cuda qwen3 ${ASSETS}/tiny_qwen3_dspine.flyx)
+  flyx_add_golden_test(golden_cuda_dflash ARGS cuda dflash)
+  flyx_add_golden_test(golden_cuda_dflash_unfused ARGS cuda dflash ENV FLYX_BACKEND_OPTIONS=fusion=0)
+  flyx_add_golden_test(golden_cuda_qwen3_dflash ARGS cuda qwen3 ${ASSETS}/tiny_qwen3_dflash.flyx)
   # decode and verification attention on tensor cores for every row (by default only past rows_attention_from keys)
   flyx_add_golden_test(golden_cuda_rows_mma ARGS cuda nvfp4 ENV FLYX_BACKEND_OPTIONS=rows_attention_from=0)
   flyx_add_golden_test(golden_cuda_qwen3_rows_mma ARGS cuda qwen3 ENV FLYX_BACKEND_OPTIONS=rows_attention_from=0)

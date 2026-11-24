@@ -327,6 +327,7 @@ export default {
     "Add to settings": "설정에 추가",
     "A DFlash2 drafter is published for this model.": "이 모델용 DFlash2 drafter가 공개되어 있습니다.",
     "A DSpine drafter is published for this model.": "이 모델용 DSpine drafter가 공개되어 있습니다.",
+    "A DFlash drafter is published for this model.": "이 모델용 DFlash drafter가 공개되어 있습니다.",
     "It often adds speed on top of MTP:": "MTP보다 더 빨라지는 경우가 많습니다:",
     "Looked in the Hugging Face cache": "Hugging Face 캐시를 검색함",
     "(the default)": "(기본 위치)",

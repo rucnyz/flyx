@@ -21,7 +21,7 @@ class ModelFile;
 namespace flyx::interfaces {
 
 struct ModelOptions {
-  std::string drafter;      // "mtp", "dflash2", "dspine", "dv", "all", "none", or "" for the model's default set
+  std::string drafter;      // "mtp", "dflash2", "dflash", "dspine", "dv", "all", "none"; "": the model's default set
   bool speculative = true;  // false: no drafter
   // "" = as each weight's file has it; "exact" = the formats' own rounding everywhere; "nvfp4" = NVFP4 weights take
   // NVFP4 inputs in passes of more rows whatever the file says, other weights as the file has it.

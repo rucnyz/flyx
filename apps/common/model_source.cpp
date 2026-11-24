@@ -210,8 +210,8 @@ bool one(const std::string& spec, const hub::ProgressFn& progress, const std::at
 
 // What kind of drafter a file or directory given beside a model holds: a GGUF's from its header when it can be read
 // (arch "dflash" against MTP), else from its name; a .flyx file or a directory of config and safetensors, the block
-// drafter it holds (DFlash2's or DSpine's, as its header says; a file that cannot be read: DFlash2's, which loading it
-// says more of).
+// drafter it holds (DFlash2's, DFlash's or DSpine's, as its header says; a file that cannot be read: DFlash2's, which
+// loading it says more of).
 std::string drafter_kind(const std::string& path) {
   const std::string lp = lower(path);
   if (lp.ends_with(".gguf")) {
@@ -253,6 +253,7 @@ constexpr KnownDrafter kKnown[] = {
     {"Qwen/Qwen3.8-27B", "tencent/Qwen3.8-27B-DSpine-b16", "dspine"},
     {"Qwen/Qwen3.5-4B", "vllm-project/Qwen3.5-4B-DFlash2", "dflash2"},
     {"Qwen/Qwen3-8B", "tencent/Qwen3-8B-DSpine-b16", "dspine"},
+    {"Qwen/Qwen3-8B", "z-lab/Qwen3-8B-DFlash-b16", "dflash"},
 };
 
 std::string known_kind(const std::string& drafter) {
@@ -261,7 +262,9 @@ std::string known_kind(const std::string& drafter) {
   return "";
 }
 
-std::string drafter_label(const std::string& kind) { return kind == "dspine" ? "DSpine" : "DFlash2"; }
+std::string drafter_label(const std::string& kind) {
+  return kind == "dspine" ? "DSpine" : kind == "dflash" ? "DFlash" : "DFlash2";
+}
 
 }  // namespace
 

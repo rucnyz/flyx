@@ -212,7 +212,9 @@ void draft_block_rows(const BatchPass& bp, const DFlashBlock& b, const std::vect
   const auto& E = block<EmbedBlock>(m, b.embed);
   const auto& head = block<HeadBlock>(m, b.head);
   const int B = b.block, H = b.hidden, nh = b.nh, nkv = b.nkv, hd = b.hd, I = b.inter;
-  const int Tp = b.conv_taps, G = H / b.conv_group, TG = Tp * G, nqkv = (nh + 2 * nkv) * hd;
+  // DFlash: no convolutions, no selector (draft_block's)
+  const bool conv = b.convs(), selector = b.selector();
+  const int Tp = b.conv_taps, TG = b.conv_cols(), nqkv = (nh + 2 * nkv) * hd;
   const size_t max_group = static_cast<size_t>(FLYX_MAX_ROWS / B);
   cudaStream_t st = v.L.st;
   const Launch& L = v.L;
@@ -237,11 +239,13 @@ void draft_block_rows(const BatchPass& bp, const DFlashBlock& b, const std::vect
     for (int j = 0; j < b.layers(); ++j) {
       const auto& l = block<DFlashLayer>(m, b.first_layer + j);
       rmsnorm(df.dx, H, l.norm.w, l.norm.offset, l.norm.eps, df.dh, H, R, H, st);
-      gemm(df.dh, H, l.attn_proj, 2 * TG, H, df.ddelta, 2 * TG, R, false, L);
-      for (size_t g = 0; g < n; ++g)
-        grouped_conv(df.dh + g * B * H, H, df.ddelta + g * B * 2 * TG, 2 * TG, l.attn_base, H, Tp, b.conv_group,
-                     df.dhc + g * B * H, H, B, false, st);
-      gemm(df.dhc, H, l.w_qkv, nqkv, H, df.dproj, df.ld_dproj, R, false, L);
+      if (conv) {
+        gemm(df.dh, H, l.attn_proj, 2 * TG, H, df.ddelta, 2 * TG, R, false, L);
+        for (size_t g = 0; g < n; ++g)
+          grouped_conv(df.dh + g * B * H, H, df.ddelta + g * B * 2 * TG, 2 * TG, l.attn_base, H, Tp, b.conv_group,
+                       df.dhc + g * B * H, H, B, false, st);
+      }
+      gemm(conv ? df.dhc : df.dh, H, l.w_qkv, nqkv, H, df.dproj, df.ld_dproj, R, false, L);
       for (size_t g = 0; g < n; ++g) {
         flyx_seq* s = bp.seq[members[off + g]].s;
         const KvBuf& kv = s->kv[size_t(b.kv)];
@@ -254,26 +258,31 @@ void draft_block_rows(const BatchPass& bp, const DFlashBlock& b, const std::vect
         attention(q_g, Kj, Vj, nh, nkv, hd, B, false, B, 1.f / std::sqrt(float(hd)), s->P, nullptr, 0,
                   df.dact + g * B * df.ld_dact, df.ld_dact, v.b.part, kRoundSplits, L, 0, b.window);
       }
-      gemm(df.dact, df.ld_dact, l.w_o, H, nh * hd, df.dtmp, H, R, false, L);
-      for (size_t g = 0; g < n; ++g)
-        grouped_conv(df.dtmp + g * B * H, H, df.ddelta + g * B * 2 * TG + TG, 2 * TG, l.attn_base + size_t(Tp) * H, H,
-                     Tp, b.conv_group, df.dx + g * B * H, H, B, true, st);
+      float* o_out = conv ? df.dtmp : df.dx;  // without a conv the projection adds into the rows
+      gemm(df.dact, df.ld_dact, l.w_o, H, nh * hd, o_out, H, R, !conv, L);
+      if (conv)
+        for (size_t g = 0; g < n; ++g)
+          grouped_conv(df.dtmp + g * B * H, H, df.ddelta + g * B * 2 * TG + TG, 2 * TG, l.attn_base + size_t(Tp) * H,
+                       H, Tp, b.conv_group, df.dx + g * B * H, H, B, true, st);
       rmsnorm(df.dx, H, l.post_norm.w, l.post_norm.offset, l.post_norm.eps, df.dh, H, R, H, st);
-      gemm(df.dh, H, l.mlp_proj, 2 * TG, H, df.ddelta, 2 * TG, R, false, L);
-      for (size_t g = 0; g < n; ++g)
-        grouped_conv(df.dh + g * B * H, H, df.ddelta + g * B * 2 * TG, 2 * TG, l.mlp_base, H, Tp, b.conv_group,
-                     df.dhc + g * B * H, H, B, false, st);
-      gemm(df.dhc, H, l.w_gu, 2 * I, H, df.dproj, df.ld_dproj, R, false, L);
+      if (conv) {
+        gemm(df.dh, H, l.mlp_proj, 2 * TG, H, df.ddelta, 2 * TG, R, false, L);
+        for (size_t g = 0; g < n; ++g)
+          grouped_conv(df.dh + g * B * H, H, df.ddelta + g * B * 2 * TG, 2 * TG, l.mlp_base, H, Tp, b.conv_group,
+                       df.dhc + g * B * H, H, B, false, st);
+      }
+      gemm(conv ? df.dhc : df.dh, H, l.w_gu, 2 * I, H, df.dproj, df.ld_dproj, R, false, L);
       if (fused) {
         swiglu_split(df.dproj, df.ld_dproj, I, R, L, l.w_down.q8_inputs());
-        gemm_presplit(l.w_down, H, I, df.dtmp, H, R, false, L);
+        gemm_presplit(l.w_down, H, I, o_out, H, R, !conv, L);
       } else {
         swiglu(df.dproj, df.ld_dproj, I, df.dact, df.ld_dact, R, st);
-        gemm(df.dact, df.ld_dact, l.w_down, H, I, df.dtmp, H, R, false, L);
+        gemm(df.dact, df.ld_dact, l.w_down, H, I, o_out, H, R, !conv, L);
       }
-      for (size_t g = 0; g < n; ++g)
-        grouped_conv(df.dtmp + g * B * H, H, df.ddelta + g * B * 2 * TG + TG, 2 * TG, l.mlp_base + size_t(Tp) * H, H,
-                     Tp, b.conv_group, df.dx + g * B * H, H, B, true, st);
+      if (conv)
+        for (size_t g = 0; g < n; ++g)
+          grouped_conv(df.dtmp + g * B * H, H, df.ddelta + g * B * 2 * TG + TG, 2 * TG, l.mlp_base + size_t(Tp) * H,
+                       H, Tp, b.conv_group, df.dx + g * B * H, H, B, true, st);
     }
     // Batch the draft head and selector hidden projection across all sequences in this group with nr >= 2
     // (solo nr >= 2 uses the tensor-core rough head k_gemm_sign_cols/k_gemm_sign, bit-identical across
@@ -302,7 +311,7 @@ void draft_block_rows(const BatchPass& bp, const DFlashBlock& b, const std::vect
       }
       draft_head_pick(head, df.dh, total_nr, b.sel_topk, df.cand, df.unary,
                       pick_scratch(bp.seq[members[off]].s, v.logits), L);
-      gemm(df.dh, H, b.sel_hid, b.sel_rank, H, df.hid, b.sel_rank, total_nr, false, L);
+      if (selector) gemm(df.dh, H, b.sel_hid, b.sel_rank, H, df.hid, b.sel_rank, total_nr, false, L);
       for (size_t bi = 0; bi < n_batched; ++bi) {
         const size_t g = batched[bi];
         const Pass& ps = bp.seq[members[off + g]];
@@ -329,7 +338,7 @@ void draft_block_rows(const BatchPass& bp, const DFlashBlock& b, const std::vect
       const int nr = std::min(width, B - 1);
       rmsnorm(df.dx + (g * B + 1) * H, H, b.norm.w, b.norm.offset, b.norm.eps, s->dh, H, nr, H, st);
       draft_head_pick(head, s->dh, nr, b.sel_topk, s->cand, s->unary, s, L);
-      gemm(s->dh, H, b.sel_hid, b.sel_rank, H, s->hid, b.sel_rank, nr, false, L);
+      if (selector) gemm(s->dh, H, b.sel_hid, b.sel_rank, H, s->hid, b.sel_rank, nr, false, L);
       selector_walk(s->P, s->cand, s->unary, b.sel_topk, s->hid, b.sel_rank, b.sel_pred, b.sel_succ, width, s->oracle,
                     s->drafts, st);
     }

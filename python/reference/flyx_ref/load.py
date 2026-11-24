@@ -20,7 +20,7 @@ READS = ("lora",)  # the parts a file may require (fileformat.py: format 2) that
 
 
 def make_draft(d: dict | None, W: dict, dtype=torch.float64):
-    """The block drafter a file's "draft" config describes (DFlash2 or DSpine), or None."""
+    """The block drafter a file's "draft" config describes (DFlash2, DFlash or DSpine), or None."""
     if not d:
         return None
     if d.get("kind") == "dspine":

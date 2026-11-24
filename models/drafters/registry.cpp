@@ -24,23 +24,31 @@ void DrafterRegistry::scan(const ModelFile& file, const TargetSpec& target, cons
   const json& hdr = file.header();
   sources_.dv = has_dv;
   if (mtp && mtp->embedded) sources_.mtp = true;
-  if (hdr.is_object() && hdr.contains("draft") && hdr["draft"].is_object())
-    (hdr["draft"].value("kind", "") == "dspine" ? sources_.dspine : sources_.dflash2) = true;
+  if (hdr.is_object() && hdr.contains("draft") && hdr["draft"].is_object()) {
+    const std::string kind = hdr["draft"].value("kind", "");
+    (kind == "dspine" ? sources_.dspine : kind == "dflash" ? sources_.dflash : sources_.dflash2) = true;
+  }
 
   for (int i = 0; i < file.companions(); ++i) {
     const json& h = hdr.at("companions").at(size_t(i));
     const std::string what = companion_label(i);
     if (is_dflash_companion(h)) {
-      if (sources_.dflash2 || sources_.dspine) throw std::runtime_error(what + "the model has a block drafter already");
+      if (sources_.dflash2 || sources_.dflash || sources_.dspine)
+        throw std::runtime_error(what + "the model has a block drafter already");
       try {
         check_made_for(h, target);
       } catch (const std::exception& e) {
         throw std::runtime_error(what + e.what());
       }
-      if (!GgufMeta::is_header(h) && h.at("draft").value("kind", "") == "dspine") {
+      const std::string kind = GgufMeta::is_header(h) ? "dflash2" : h.at("draft").value("kind", "");
+      if (kind == "dspine") {
         sources_.dspine = true;
         sources_.dspine_beside = true;
         dspine_companion_ = i;
+      } else if (kind == "dflash") {  // DFlash2's block without convolutions or selector: its spec and file
+        sources_.dflash = true;
+        sources_.dflash_beside = true;
+        dflash2_companion_ = i;
       } else {
         sources_.dflash2 = true;
         sources_.dflash2_beside = true;
@@ -92,7 +100,7 @@ const DSpineSpec& DrafterRegistry::ensure_dspine_spec(const ModelFile& file, con
 void DrafterRegistry::validate_selected(const ModelFile& file, const std::vector<Drafter>& selected,
                                         const TargetSpec& target) {
   for (Drafter kind : selected) {
-    if (kind == Drafter::kDFlash2) (void)ensure_dflash2_spec(file, target);
+    if (kind == Drafter::kDFlash2 || kind == Drafter::kDFlash) (void)ensure_dflash2_spec(file, target);
     if (kind == Drafter::kDSpine) (void)ensure_dspine_spec(file, target);
   }
 }
@@ -125,7 +133,7 @@ int DrafterRegistry::attach(Drafter kind, const ModelFile& file, Tables& T, cons
     if (max_drafts_out) *max_drafts_out = FLYX_MAX_ROWS - 1;
     return blk;
   }
-  if (kind == Drafter::kDFlash2) {
+  if (kind == Drafter::kDFlash2 || kind == Drafter::kDFlash) {
     const DFlash2Spec& spec = ensure_dflash2_spec(file, target);
     dflash2_block_ = build_dflash2(T, spec, target);
     context_blocks_.push_back(dflash2_block_);

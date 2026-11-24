@@ -402,7 +402,7 @@ void cache_snapshots(const fs::path& tmp) {
 
 // ---- a drafter's kind from a cached config ----------------------------------------------------------------------
 // tencent's DSpine drafters were first published as DFlashDraftModel with a code bridge in their dflash_config: read
-// as DSpine.  DFlash's own DFlashDraftModel (no bridge) is no drafter flyx reads.
+// as DSpine.  DFlash's own DFlashDraftModel (no bridge): DFlash.
 void cached_drafter_kinds(const fs::path& tmp) {
   const std::string commit = "3333333333333333333333333333333333333333";
   const std::pair<const char*, const char*> cases[] = {
@@ -422,8 +422,8 @@ void cached_drafter_kinds(const fs::path& tmp) {
         "a DSpine drafter named DFlashDraftModel, its code bridge in its config: DSpine");
   check(flyx::hub::in_cache("acme/new-DSpine", "main", &new_r) && flyx::hub::drafter_kind(new_r) == "dspine",
         "a DSpineDraftModel: DSpine");
-  check(flyx::hub::in_cache("acme/DFlash", "main", &dflash) && !flyx::hub::is_drafter(dflash),
-        "DFlash's DFlashDraftModel, no code bridge: no drafter flyx reads");
+  check(flyx::hub::in_cache("acme/DFlash", "main", &dflash) && flyx::hub::drafter_kind(dflash) == "dflash",
+        "DFlash's DFlashDraftModel, no code bridge: DFlash");
 }
 
 // ---- a fake Hub ------------------------------------------------------------------------------------------------

@@ -36,25 +36,26 @@ flyx serve unsloth/Qwen3.8-27B-GGUF:UD-IQ2_S --drafter-file z-lab/Qwen3.8-27B-DF
 | `org/repo:QUANT@REV` | Pins a branch or commit hash (also used to address older cached snapshots). |
 | Auto MTP sidecar | If a GGUF lacks an embedded MTP layer and the repo contains `MTP/*.gguf` (e.g., `unsloth/Qwen3.8-27B-GGUF`), `flyx` fetches and attaches it automatically. |
 | Auto `mmproj` vision projector | If a Hub GGUF repo contains a vision projector (`mmproj-BF16.gguf` preferred over F16/F32), `flyx` fetches and attaches it automatically unless `--no-vision` or an explicit `--mmproj` path is given. |
-| Direct block-drafter loading | `z-lab/*-DFlash2`, `vllm-project/*-DFlash2` and `tencent/*-DSpine-b16` safetensors repos as well as llama.cpp `general.architecture=dflash` GGUF drafters (e.g. `z-lab/Qwen3.8-27B-DFlash2-GGUF`) load directly with no conversion step across supported target architectures (`qwen35`, `qwen3`, `llama`). |
+| Direct block-drafter loading | `z-lab/*-DFlash2`, `vllm-project/*-DFlash2`, `z-lab/*-DFlash-b16` and `tencent/*-DSpine-b16` safetensors repos as well as llama.cpp `general.architecture=dflash` GGUF drafters (e.g. `z-lab/Qwen3.8-27B-DFlash2-GGUF`) load directly with no conversion step across supported target architectures (`qwen35`, `qwen3`, `llama`). |
 | Downloader & cache | 16 parallel range connections, SHA-256 verified against Hub metadata, resumable across restarts, multi-process coordinated via `.flyx-lock` files in standard HF cache (`HF_HOME`, `HF_HUB_CACHE`, `HF_TOKEN`, `HF_ENDPOINT`, `HF_HUB_OFFLINE=1`). Requires `libcurl` on Linux; native WinHTTP on Windows. |
 
 ---
 
 ## 3. Speculative Drafters
 
-`flyx` supports five drafter sources and can run multiple simultaneously; a per-round controller (`RoundChooser`) chooses the drafter and width dynamically from load-time measured costs and live acceptance rates.
+`flyx` supports six drafter sources and can run multiple simultaneously; a per-round controller (`RoundChooser`) chooses the drafter and width dynamically from load-time measured costs and live acceptance rates.
 
 | Drafter | Source | Notes |
 |---|---|---|
 | **MTP** (Multi-Token Prediction) | Embedded in GGUF/HF checkpoint, or sidecar `--drafter-file MTP/mtp-*.gguf` | Default when present. Shares target embedding/head. At long contexts (> 32K), uses 4096-token exact ring + 2-bit StrataFlux copy (`mtp_window`, `mtp_copy`). |
 | **DFlash2** (block diffusion) | HF safetensors repo (`--drafter-file z-lab/Qwen3.8-27B-DFlash2`), `arch=dflash` GGUF (BF16 or quantized GGML blocks), or converted `.flyx` | For Qwen3.5 / Qwen3.8, Qwen3, and Llama targets (a drafter made for another model is refused). Beside GGUF and BF16 targets, floating-point DFlash2 projections are quantized to Q8_0, beside NVFP4 targets to NVFP4 (pre-quantized GGUF drafters stay packed; `--backend-opt draft_weights=exact` keeps them as given). A GGUF drafter that is causal, samples from the anchor, has a confidence head, soft-capped logits or a Markov context (DSpark), or reads the target's final hidden state, is refused. Strongest on code/structured text; `--drafter dflash2` selects it exclusively. |
-| **DSpine** (adjacent causal injection) | HF repo (`--drafter-file tencent/Qwen3.8-27B-DSpine-b16`, `tencent/Qwen3-8B-DSpine-b16`) or converted `.flyx`; for Qwen3.5 / Qwen3.8, Qwen3, and Llama targets (a drafter made for another model is refused) | A DFlash-style block drafter (the same context from target taps) whose layers attend causally within the block and pass a low-rank message from each row to the next (the code bridge); its drafts walk the head's top 16 with the last layer's message redone from the token actually drafted. A round of fewer drafts runs fewer rows. Chains only (no draft trees); its layer projections are quantized to NVFP4 beside BF16 or NVFP4 weights and to Q8_0 beside GGML block weights (its walk re-scores the head's candidates, so NVFP4 layers cost it at most 1% of its tokens a round), its bridge stays BF16. `--drafter dspine` selects it exclusively; a model holds one block drafter (DFlash2 or DSpine). |
+| **DFlash** (DFlash2's predecessor) | HF repo (`--drafter-file z-lab/Qwen3-8B-DFlash-b16`) or converted `.flyx`; for Qwen3.5 / Qwen3.8, Qwen3, and Llama targets (a drafter made for another model is refused) | z-lab's `DFlashDraftModel`: DFlash2's block (the same context, attention both ways within the block) without the grouped convolutions or the candidate selector; each row's draft is the head's best. Runs on DFlash2's kernels (batched across sessions as DFlash2 is), its projections quantized as DFlash2's. Chains only (no draft trees). `--drafter dflash` selects it exclusively. |
+| **DSpine** (adjacent causal injection) | HF repo (`--drafter-file tencent/Qwen3.8-27B-DSpine-b16`, `tencent/Qwen3-8B-DSpine-b16`) or converted `.flyx`; for Qwen3.5 / Qwen3.8, Qwen3, and Llama targets (a drafter made for another model is refused) | A DFlash-style block drafter (the same context from target taps) whose layers attend causally within the block and pass a low-rank message from each row to the next (the code bridge); its drafts walk the head's top 16 with the last layer's message redone from the token actually drafted. A round of fewer drafts runs fewer rows. Chains only (no draft trees); its layer projections are quantized to NVFP4 beside BF16 or NVFP4 weights and to Q8_0 beside GGML block weights (its walk re-scores the head's candidates, so NVFP4 layers cost it at most 1% of its tokens a round), its bridge stays BF16. `--drafter dspine` selects it exclusively; a model holds one block drafter (DFlash2, DFlash or DSpine). |
 | **DV** (bifill-dv's canvas drafter) | A DV `.flyx` file: a Llama with bifill-dv's canvas and selector written in (`flyx_convert --dv`) | Only when named (`--drafter dv` or `all`). A canvas pass of the target's weights with its own adapter over 32 slots after the anchor, then a selector that grows a tree of the file's width (31) or of 15, verified exactly (rounds of up to 64 rows). Its warm-up, its trees of 15 and of 31, plain decoding and lookup rounds are chosen every round by tokens per ms at the context; `--width N` pins it. CUDA backend only; see [DV](design/dv.md). |
 | **Prompt Lookup** | Built-in (enabled by default) | Verifies 15 drafts copied from matching 6-token n-grams in the current sequence with zero drafter forward pass. Big speedup on agent code edits/repeats; backs off for 32 tokens after poor rounds (`--no-lookup` disables). |
 
 Control flags:
-- `--drafter mtp|dflash2|dspine|dv|all|none`
+- `--drafter mtp|dflash2|dflash|dspine|dv|all|none`
 - `--drafter-file PATH_OR_HF` (repeatable)
 - `--width N` (pin model drafter width; lookup remains active unless `--no-lookup`)
 - `--draft-trees` (opt-in DFlash2 dynamic trees; off by default)
@@ -65,7 +66,7 @@ Control flags:
 
 ## 4. Converting Hugging Face Checkpoints to `.flyx`
 
-GGUF files run directly without conversion. Convert HF Safetensors (BF16 or ModelOpt NVFP4) or standalone DFlash2 / DSpine checkpoints to `.flyx` using `python/convert`:
+GGUF files run directly without conversion. Convert HF Safetensors (BF16 or ModelOpt NVFP4) or standalone DFlash2 / DFlash / DSpine checkpoints to `.flyx` using `python/convert`:
 
 ```sh
 # Target + DFlash2 combined into one .flyx (BF16 or ModelOpt NVFP4)
@@ -93,6 +94,11 @@ PYTHONPATH=python/convert python -m flyx_convert \
 hf download tencent/Qwen3.8-27B-DSpine-b16 --local-dir ~/models/Qwen3.8-27B-DSpine-b16
 PYTHONPATH=python/convert python -m flyx_convert \
     --draft ~/models/Qwen3.8-27B-DSpine-b16 -o ~/models/qwen38-27b-dspine.flyx
+
+# DFlash (z-lab's first block drafters): beside a Qwen3 model the same way
+hf download z-lab/Qwen3-8B-DFlash-b16 --local-dir ~/models/Qwen3-8B-DFlash-b16
+PYTHONPATH=python/convert python -m flyx_convert \
+    --model ~/models/Qwen3-8B --draft ~/models/Qwen3-8B-DFlash-b16 -o ~/models/qwen3-8b-dflash.flyx
 ```
 
 ```sh
