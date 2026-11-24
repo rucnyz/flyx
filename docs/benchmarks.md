@@ -195,14 +195,17 @@ done
 
 ---
 
-## 6. Block Drafters on Qwen3.8-27B and Qwen3-8B: DSpine, DFlash2, MTP (RTX PRO 6000)
+## 6. Block Drafters on Qwen3.8-27B and Qwen3-8B: DSpine, DFlash2, DFlash, MTP (RTX PRO 6000)
 
-One RTX PRO 6000 Blackwell Server Edition (96 GB, driver `620.70.06`), flyx at the DSpine change (Release, CUDA
-13.4, `FLYX_CUDA_ARCHS=120-real`), greedy, thinking off, up to 1024 new tokens a prompt, each prompt in a fresh session:
+One RTX PRO 6000 Blackwell Server Edition (96 GB, driver `620.70.06`; flyx at the DSpine change for the 27B, at the
+DFlash change for the 8B; Release, CUDA 13.4, `FLYX_CUDA_ARCHS=120-real`), greedy, thinking off unless said, up to
+1024 new tokens a prompt, each prompt in a fresh session:
 
 * **Qwen3.8-27B**: `QUASAR-QAT/Qwen3.8-27B-QUASAR-NVFP4` (`4a22293a`, its MTP layer kept), converted once with
   `z-lab/Qwen3.8-27B-DFlash2` (`50307d4c`, block 8) and once with `tencent/Qwen3.8-27B-DSpine-b16` (`260a6c23`).
-* **Qwen3-8B**: `Qwen/Qwen3-8B` (`b968826d`, BF16) with `tencent/Qwen3-8B-DSpine-b16` (`3b1e69d0`).
+* **Qwen3-8B**: `Qwen/Qwen3-8B` (`b968826d`, BF16), converted once with `tencent/Qwen3-8B-DSpine-b16` (`3b1e69d0`) and
+  once with `z-lab/Qwen3-8B-DFlash-b16` (`9b41424b`; DFlash, DFlash2's block without its convolutions or selector, the
+  baseline the DSpine authors compare against), all of its columns in one run.
 * **Prompts**: `bench/prompts/eval_sets.py` (the first 30 of GSM8K, MATH-500, HumanEval, MBPP and MT-Bench's first
   turns) and `bench/prompts/chat_short.jsonl` (24).
 
@@ -215,10 +218,14 @@ flyx bench q27-dspine.flyx --prompts sets/gsm8k.jsonl -n 1024 --json gsm8k.json 
 # thinking on: the first 20 of GSM8K as token ids, the template's opener after the assistant's role
 python -I bench/prompts/eval_sets.py hf/ think/ --n 20 --think Qwen3.8-27B-QUASAR-NVFP4/tokenizer.json --opener $'<think>\n'
 flyx bench q27-dspine.flyx --prompts think/gsm8k_think.jsonl -n 1024 --json think.json --drafter dspine --width 15 --no-lookup
+# Qwen3-8B: the DSpine file the same way, and DFlash's; thinking on, the first 30 (Qwen3's template opens nothing)
+PYTHONPATH=python/convert python -m flyx_convert --model Qwen3-8B --draft Qwen3-8B-DFlash-b16 -o q8-dflash.flyx
+python -I bench/prompts/eval_sets.py hf/ think8/ --think Qwen3-8B/tokenizer.json
+flyx bench q8-dflash.flyx --prompts sets/gsm8k.jsonl -n 1024 --json gsm8k.json --drafter dflash [--width 15 --no-lookup]
 ```
 
-Decode `tok/s` (tokens a round). Every drafted answer is plain decoding's, token for token (all 174 prompts, every
-configuration).
+Decode `tok/s` (tokens a round). Every drafted answer is plain decoding's, token for token, in every configuration
+(the 27B: 174 prompts and 40 with thinking on; the 8B: 234).
 
 | Qwen3.8-27B | plain | MTP | DFlash2 | DSpine | DFlash2, 7 drafts | DSpine, 15 drafts |
 |---|---:|---:|---:|---:|---:|---:|
@@ -229,24 +236,31 @@ configuration).
 | MT-Bench | 81.5 | 196.8 (3.14) | 228.2 (3.40) | 202.7 (3.02) | **228.5** (3.37) | 175.3 (3.15) |
 | chat | 81.6 | 218.1 (3.53) | **263.4** (3.94) | 237.0 (3.57) | 258.4 (3.81) | 205.6 (3.69) |
 
-| Qwen3-8B | plain | DSpine | DSpine, 15 drafts |
-|---|---:|---:|---:|
-| GSM8K | 87.6 | 623.5 (9.92) | 624.9 (10.03) |
-| MATH-500 | 87.5 | 531.8 (8.37) | 547.8 (8.68) |
-| HumanEval | 87.7 | 484.5 (7.66) | 491.2 (7.80) |
-| MBPP | 87.6 | 460.7 (7.25) | 474.8 (7.54) |
-| MT-Bench | 87.5 | 235.5 (3.51) | 229.3 (3.60) |
-| chat | 87.6 | 294.3 (4.50) | 294.7 (4.62) |
+| Qwen3-8B | plain | DFlash | DSpine | DFlash, 15 drafts | DSpine, 15 drafts |
+|---|---:|---:|---:|---:|---:|
+| GSM8K | 87.7 | 379.3 (5.68) | 625.4 (9.91) | 398.0 (6.12) | **627.8** (10.03) |
+| MATH-500 | 87.6 | 446.7 (6.82) | 538.9 (8.47) | 458.2 (7.07) | **550.0** (8.68) |
+| HumanEval | 87.7 | 388.8 (5.87) | 485.8 (7.64) | 401.2 (6.17) | **493.1** (7.80) |
+| MBPP | 87.7 | 385.3 (5.82) | 466.0 (7.33) | 398.3 (6.14) | **476.5** (7.54) |
+| MT-Bench | 87.5 | 183.1 (2.68) | **236.1** (3.53) | 177.4 (2.71) | 230.2 (3.60) |
+| chat | 87.7 | 217.7 (3.18) | **297.7** (4.58) | 213.8 (3.27) | 295.8 (4.62) |
+| GSM8K, thinking | 87.5 | 216.1 (3.17) | 277.6 (4.28) | 214.8 (3.28) | **279.3** (4.37) |
+| MBPP, thinking | 87.6 | 208.3 (3.04) | **243.3** (3.68) | 204.8 (3.13) | 241.5 (3.77) |
 
 * A round costs DSpine what it costs DFlash2 at each width (the engine's load-time timings on the 27B: 14.02 / 14.87
   / 18.01 ms for 3 / 7 / 15 drafts against 14.14 / 14.90 / 17.73), and DSpine's NVFP4 layer copies beside the NVFP4
   target accept as its exact weights do (GSM8K at 15 drafts: 7.51 against 7.49 tokens a round).
 * DSpine at its block of 16 accepts more than DFlash2 at its block of 8, as its authors report (GSM8K: 7.51 against
   6.20 tokens a round; with thinking on, `think/gsm8k_think.jsonl` above: 6.93 against 5.60, 378.5 against
-  376.6 tok/s), and on Qwen3-8B as they report (GSM8K at 15 drafts: 10.03; theirs 10.55).  Its first drafts are accepted less often than DFlash2's on
+  376.6 tok/s).  Its first drafts are accepted less often than DFlash2's on
   the 27B (the first: 0.912 against 0.948; seven deep: 0.419 against 0.567), and flyx's DFlash2 also drafts 15 from
   a wider block (GSM8K, `--width 15 --no-lookup`: 8.26 tokens a round, 455.2 tok/s): the faster of the two depends on
   the text, DSpine on code (HumanEval, MBPP), DFlash2 on math and chat.
+* On Qwen3-8B, DFlash's round costs what DSpine's does (the load-time timings: 14.16 / 14.44 / 15.50 ms for 3 / 7 / 15
+  drafts against 14.10 / 14.76 / 15.50; plain decoding's 11.66), and DSpine accepts 1.2 to 1.6 times as many tokens a
+  round and is that much faster: GSM8K at 15 drafts 10.03 against 6.12 tokens a round, 627.8 against 398.0 tok/s (the
+  authors: 10.55 against 6.32); code 1.2 times, chat 1.4.  Both accept fewer on MT-Bench than the authors report (3.60
+  and 2.71 against 5.63 and 4.26), in the same ratio.
 * Chosen every round, DSpine's widths stay mostly at 7 drafts where 15 give more (GSM8K: 387.1 against 412.7 tok/s):
   a fresh session's acceptance per position starts from the controller's prior (0.8 - 0.02 i), and a reply of a few
   hundred tokens seldom reaches positions past 7 to learn them.
