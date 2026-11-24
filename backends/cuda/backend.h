@@ -664,6 +664,21 @@ struct flyx_seq {
   float *dx = nullptr, *dh = nullptr, *dhc = nullptr, *dtmp = nullptr, *dproj = nullptr, *dact = nullptr,
         *ddelta = nullptr, *dq = nullptr;
   int ld_proj = 0, ld_act = 0, ld_feats = 0, ld_dproj = 0, ld_dact = 0, ld_ckv = 0;
+  // DSpine's bridge and walk (regions/layers.cpp dspine_block); null without a DSpine drafter.  n = the block's rows,
+  // c = topk of the walk's candidates a row, senders = 1 + (n - 2) c (the anchor, then each candidate of a row but
+  // the last's).
+  struct DSpineRows {
+    float* codes = nullptr;   // the rows' codes [n][code]; the walk's senders' [senders][code]
+    float* gates = nullptr;   // their gate | pred | prev [n][3 rank]; the senders' pred | prev [senders][2 rank]
+    float* msg = nullptr;     // the rows' messages [n][rank]
+    float* rms = nullptr;     // the rows' rms before the write [n] (the last layer's after the block)
+    float* before = nullptr;  // the last layer's rows before its write [n][hidden]
+    float* g = nullptr;       // and their gate projections [n][rank]
+    float* heads = nullptr;   // the candidates' head rows times the final norm's weight [(n - 1) c][hidden]
+    float* tg = nullptr;      // those through the last write [(n - 1) c][rank]
+    float* base = nullptr;    // each candidate's score from its row alone [(n - 1) c]
+    int* pick = nullptr;      // each sender's best candidate of the row after it [senders]
+  } ds;
 
   // host mirror (valid whenever nothing is in flight)
   int position = 0, round = 0;

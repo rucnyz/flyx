@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#define FLYX_BACKEND_ABI_VERSION 44u
+#define FLYX_BACKEND_ABI_VERSION 45u
 #define FLYX_BACKEND_ENTRY "flyx_backend_get_api"
 /* How a backend library exports its entry. */
 #if defined(_WIN32)
@@ -287,7 +287,9 @@ typedef enum {
   FLYX_BLOCK_VISION_STEM = 11, /* ABI 44: patch embed + optional bias + optional pos embed / cls */
   FLYX_BLOCK_VIT_ATTN = 12,    /* ABI 44: bidirectional ViT self-attention */
   FLYX_BLOCK_VIT_MLP = 13,     /* ABI 44: ViT FFN (2-layer standard or 3-layer gated) */
-  FLYX_BLOCK_VISION_MERGE = 14 /* ABI 44: spatial merge/pool + optional norm + 1/2-layer projector */
+  FLYX_BLOCK_VISION_MERGE = 14, /* ABI 44: spatial merge/pool + optional norm + 1/2-layer projector */
+  FLYX_BLOCK_DSPINE = 15,      /* ABI 45 */
+  FLYX_BLOCK_DSPINE_LAYER = 16 /* ABI 45 */
 } flyx_block_kind;
 
 /* Token rows -> residual rows: x = table[token]. */
@@ -392,6 +394,46 @@ typedef struct {
   int32_t q, k, v, o, gate, up, down;
   int32_t attn_conv_proj, attn_conv_base, mlp_conv_proj, mlp_conv_base;
 } flyx_dflash2_layer_block;
+
+/* DSpine block drafter (ABI 45; python/reference/flyx_ref/dspine.py): `block` rows (the anchor, then mask_token)
+ * through its layers (DSPINE_LAYER blocks), each a Qwen3 layer whose attention sees the context K/V and the block's
+ * rows up to its own (causal; with a window, only the positions less than `window` before its own), then the code
+ * bridge's write.  With x_r row r's residual after the layer, rms_r = sqrt(mean(x_r^2)):
+ *   c_r = sqrt(code) u_r / (|u_r| + bridge_eps), u_r = read (x_r / (rms_r + bridge_eps))      (r >= 1)
+ *   c_0 = sqrt(code) codebook[anchor]
+ *   x_r += rms_r write m_r,  m_r = sigmoid(gate c_r + pred c_{r-1} + gate_bias) * (prev c_{r-1})   (r >= 1)
+ * (read and write the layer's).  Then per row r >= 1: norm, the head's `topk` best tokens (high to low, the lower
+ * id on ties), and the walk: row r's draft is the candidate t maximising <x'_r, norm.w * head[t]> (the first on
+ * ties), x'_r the row's last write redone with e = sqrt(code) codebook[the draft before it] (the anchor for row 1)
+ * in place of c_{r-1}, from the x_r and c_r before that write.  No row reads a row after it: a block of fewer rows
+ * drafts the same first drafts.  Its context is DFlash2's: fc(the residual rows tapped at n_taps points) ->
+ * hidden_norm -> each layer's k (k_norm, rope) and v into its cache.  The embedding and head blocks may hold packed
+ * GGML blocks.  Only drafting reads it: it never changes the output. */
+typedef struct {
+  int32_t hidden, n_heads, n_kv, head_dim, inter;
+  int32_t block, mask_token, n_taps;
+  int32_t code, rank, topk;            /* the bridge's code size and message rank; the walk's candidates (<= 16) */
+  int32_t window;                      /* sliding window of every layer; 0: none */
+  double theta, bridge_eps;
+  int32_t embed, head;                 /* blocks */
+  int32_t first_layer, layers;         /* blocks of kind DSPINE_LAYER */
+  flyx_norm hidden_norm, norm;
+  int32_t fc;
+  int32_t codebook;                    /* [vocab, code] */
+  int32_t gate, pred, prev;            /* [rank, code] */
+  int32_t gate_bias;                   /* [rank] */
+  int32_t kv;                          /* state: one cache per layer */
+  int32_t pad0;
+} flyx_dspine_block;
+
+/* A DSpine layer: attention (q, k, v, o; q/k norms; rotary on all dims), MLP, and the bridge's read [code, hidden]
+ * and write [hidden, rank] after them. */
+typedef struct {
+  flyx_norm norm, post_norm, q_norm, k_norm;
+  int32_t q, k, v, o, gate, up, down;
+  int32_t read, write;
+  int32_t pad0;
+} flyx_dspine_layer_block;
 
 /* The tree DV drafts (flyx_dv_block.tree; ops/draft/ref.h). */
 typedef enum {
@@ -571,6 +613,8 @@ typedef struct {
     flyx_vit_attn_block vit_attn;         /* ABI 44 */
     flyx_vit_mlp_block vit_mlp;           /* ABI 44 */
     flyx_vision_merge_block vision_merge; /* ABI 44 */
+    flyx_dspine_block dspine;          /* ABI 45 */
+    flyx_dspine_layer_block dspine_layer;  /* ABI 45 */
   };
 } flyx_block;
 

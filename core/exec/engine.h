@@ -46,8 +46,9 @@ struct EngineOptions {
   std::string backend;       // empty = auto
   std::string backend_dir;   // empty = next to the executable
   bool speculative = true;
-  // "mtp" | "dflash2" | "dv" | "all" | "none" | empty = the drafter files' drafters and the model file's MTP layer,
-  // else its DFlash2 drafter (models/model.h: choose_drafters); its DV drafter only when named ("dv", "all").  With
+  // "mtp" | "dflash2" | "dspine" | "dv" | "all" | "none" | empty = the drafter files' drafters and the model file's
+  // MTP layer, else its block drafter (DFlash2 or DSpine; models/model.h: choose_drafters); its DV drafter only when
+  // named ("dv", "all").  With
   // several, the drafter is chosen every round; DV is never beside another drafter, its rounds chosen
   // against plain decoding's and lookup's every round (docs/design/dv.md).
   std::string drafter;

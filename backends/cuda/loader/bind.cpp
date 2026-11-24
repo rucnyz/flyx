@@ -5,6 +5,8 @@
 // stacked (q|k|v, gate|up, the GDN in-projection, every DFlash2 layer's
 // context k|v, DV's adapters on one input), norms as float.  Knows block
 // kinds, not models.
+#include <cstring>
+
 #include "backends/cuda/loader/loader.h"
 
 namespace flyx::cuda {
@@ -288,6 +290,97 @@ DFlashBlock dflash(WeightLoader& L, const flyx_model_desc& d, const flyx_dflash2
   f.kv = state_of(sm.kv, b.kv, "K/V");
   const KvSpec& k = L.model()->states.kv[size_t(f.kv)];
   expect(k.layers == f.layers() && k.nkv == f.nkv && k.hd == f.hd, "DFlash2 context cache differs from its layers");
+  return f;
+}
+
+// A DSpine layer: DFlash2's without the convs, the bridge's read and write (bf16).
+DFlashLayer dspine_layer(WeightLoader& L, const flyx_dspine_layer_block& b) {
+  DFlashLayer l;
+  l.norm = norm(L, b.norm);
+  l.post_norm = norm(L, b.post_norm);
+  l.q_norm = norm(L, b.q_norm);
+  l.k_norm = norm(L, b.k_norm);
+  l.w_qkv = Lin{L.stack({b.q, b.k, b.v})};
+  l.w_o = Lin{L.mat(b.o)};
+  l.w_gu = Lin{L.stack({b.gate, b.up})};
+  l.w_down = Lin{L.mat(b.down)};
+  l.read = Lin{L.mat(b.read)};
+  l.write = Lin{L.mat(b.write)};
+  return l;
+}
+
+// A [rows, cols] matrix transposed, [cols, rows] bf16 on the device (from bf16 values: no rounding).
+bf16* transposed(WeightLoader& L, int w, int rows, int cols) {
+  const std::vector<float> f = L.host_f32(w);
+  expect(f.size() == size_t(rows) * size_t(cols), "a matrix to transpose of another size");
+  std::vector<uint16_t> t(f.size());
+  for (int r = 0; r < rows; ++r)
+    for (int c = 0; c < cols; ++c) {
+      uint32_t u;
+      std::memcpy(&u, &f[size_t(r) * cols + c], 4);
+      u += 0x7FFF + ((u >> 16) & 1);  // round to nearest even (exact for a bf16 value)
+      t[size_t(c) * rows + r] = uint16_t(u >> 16);
+    }
+  bf16* out = L.model()->alloc<bf16>(t.size());
+  CK(cudaMemcpy(out, t.data(), t.size() * sizeof(uint16_t), cudaMemcpyHostToDevice));
+  return out;
+}
+
+// DSpine: DFlash2's block (its context the same), sel_topk its walk's candidates, and its bridge.
+DFlashBlock dspine(WeightLoader& L, const flyx_model_desc& d, const flyx_dspine_block& b, const StateMap& sm) {
+  DFlashBlock f;
+  f.hidden = b.hidden;
+  f.nh = b.n_heads;
+  f.nkv = b.n_kv;
+  f.hd = b.head_dim;
+  f.inter = b.inter;
+  f.theta = b.theta;
+  rope_register(f.theta, f.hd);
+  f.block = b.block;
+  f.mask_token = b.mask_token;
+  expect(b.window >= 0, "a DSpine window below zero");
+  f.window = b.window;
+  f.n_taps = b.n_taps;
+  f.target_hidden = d.hidden;
+  f.sel_topk = b.topk;
+  f.embed = b.embed;
+  f.head = b.head;
+  f.first_layer = b.first_layer;
+  f.n_layers = b.layers;
+  f.fc = Lin{L.mat(b.fc)};
+  f.hidden_norm = norm(L, b.hidden_norm);
+  f.norm = norm(L, b.norm);
+  std::vector<int> ctx, kn;
+  double eps = 0;
+  for (int j = 0; j < b.layers; ++j) {
+    expect(b.first_layer >= 0 && b.first_layer + j < d.n_blocks &&
+               d.blocks[b.first_layer + j].kind == FLYX_BLOCK_DSPINE_LAYER,
+           "DSpine layers are not its layer blocks");
+    const auto& l = d.blocks[b.first_layer + j].dspine_layer;
+    ctx.push_back(l.k);
+    ctx.push_back(l.v);
+    kn.push_back(l.k_norm.w);
+    expect(l.k_norm.offset == 0.0 && (j == 0 || l.k_norm.eps == eps), "DSpine context k norms: plain weights, one eps");
+    eps = l.k_norm.eps;
+  }
+  int rows = 0;
+  f.ctx = Lin{L.stack(ctx, &rows)};
+  expect(rows == f.ctx_width(), "DSpine context k|v rows do not match its dimensions");
+  f.k_norms = {L.vecs(kn), 0.f, float(eps)};
+  f.kv = state_of(sm.kv, b.kv, "K/V");
+  const KvSpec& k = L.model()->states.kv[size_t(f.kv)];
+  expect(k.layers == f.layers() && k.nkv == f.nkv && k.hd == f.hd, "DSpine context cache differs from its layers");
+  DSpineBridge& g = f.dspine;
+  g.code = b.code;
+  g.rank = b.rank;
+  g.topk = b.topk;
+  g.eps = float(b.bridge_eps);
+  g.codebook = L.mat(b.codebook);
+  g.packed = Lin{L.stack({b.gate, b.pred, b.prev}, &rows)};
+  expect(rows == 3 * b.rank, "DSpine gate | pred | prev rows do not match its rank");
+  g.pv = Lin{g.packed.w + size_t(b.rank) * size_t(b.code)};
+  g.gate_bias = L.vec(b.gate_bias);
+  g.write_t = Lin{transposed(L, d.blocks[b.first_layer + b.layers - 1].dspine_layer.write, b.hidden, b.rank)};
   return f;
 }
 
@@ -605,6 +698,21 @@ void bind(flyx_bmodel* m, const flyx_model_desc& d, LoadTimes* times) {
         break;
       }
       case FLYX_BLOCK_DFLASH2_LAYER: add(m, dflash_layer(L, b.dflash2_layer)); break;
+      case FLYX_BLOCK_DSPINE: {  // as DFlash2's: the block drafter (m->dflash_block), with its bridge
+        const int e = ref(b.dspine.embed, FLYX_BLOCK_EMBED, "embedding");
+        const int head = ref(b.dspine.head, FLYX_BLOCK_HEAD, "head");
+        const auto& E = block<EmbedBlock>(m, e);
+        const auto& Hd = block<HeadBlock>(m, head);
+        expect((E.table || E.blk.data) && (Hd.w || Hd.wb.data),
+               "the DSpine drafter reads an embedding and a head of bf16 or packed GGML blocks");
+        expect(m->dflash_block < 0, "more than one block drafter");
+        expect(m->head_block < 0 || m->head_block == head, "drafters that read different heads");
+        m->dflash_block = i;
+        m->head_block = head;
+        add(m, dspine(L, d, b.dspine, sm));
+        break;
+      }
+      case FLYX_BLOCK_DSPINE_LAYER: add(m, dspine_layer(L, b.dspine_layer)); break;
       case FLYX_BLOCK_DV: {
         const int e = ref(b.dv.embed, FLYX_BLOCK_EMBED, "embedding");
         const int head = ref(b.dv.head, FLYX_BLOCK_HEAD, "head");

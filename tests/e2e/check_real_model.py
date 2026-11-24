@@ -108,7 +108,7 @@ def main():
                     help="exact: bf16 inputs for every matrix; nvfp4: NVFP4 weights take NVFP4 inputs in prefill "
                          "passes whatever the file says (default: as the file has it; NVFP4 weights take bf16 ones "
                          "by themselves on a GPU without FP4 tensor cores)")
-    ap.add_argument("--drafters", nargs="*", choices=("mtp", "dflash2"), default=["mtp", "dflash2"],
+    ap.add_argument("--drafters", nargs="*", choices=("mtp", "dflash2", "dspine"), default=["mtp", "dflash2"],
                     help="drafters held to plain decoding, each one the file must have (GGUF typically has only "
                          "mtp; none named: plain alone, for a model without drafters such as MiniCPM5-1B); plain "
                          "always runs")

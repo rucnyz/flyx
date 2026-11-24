@@ -383,6 +383,12 @@ flyx_add_golden_test(golden_cpu_ref_llama_dv_lora ARGS cpu_ref llama_dv_lora)
 flyx_add_golden_test(golden_cpu_ref_gdn128 ARGS cpu_ref gdn128)
 # A DFlash2 drafter whose layers attend a sliding window (z-lab's 27B drafter's), shorter than its block here.
 flyx_add_golden_test(golden_cpu_ref_window ARGS cpu_ref window)
+# A DSpine drafter in place of DFlash2's (the whole battery: its rounds, oracle runs, rollback, sampling, ...), and one
+# whose layers attend a causal sliding window of 8 (the 27B's drafter's), shorter than its block.
+flyx_add_golden_test(golden_cpu_ref_dspine ARGS cpu_ref dspine)
+flyx_add_golden_test(golden_cpu_ref_dspine_window ARGS cpu_ref dspine_window)
+# The tiny Qwen3 with a DSpine drafter (taps and context in a second architecture's programs): transformers' tokens.
+flyx_add_golden_test(golden_cpu_ref_qwen3_dspine ARGS cpu_ref qwen3 ${ASSETS}/tiny_qwen3_dspine.flyx)
 
 set_tests_properties(tokenizer tokenizer_minicpm5 chat chat_qwen35 reply_grammars request reply_text
                      scheduler_cpu_ref scheduler_queue scheduler_prewarmed_history scheduler_interrupted_prewarm
@@ -410,7 +416,7 @@ if(TARGET flyx-cuda)
   add_executable(cuda_op_test backends/cuda/op_test.cu backends/cuda/op_test_gemm.cu backends/cuda/op_test_blocks.cu
                  backends/cuda/op_test_attention.cu backends/cuda/op_test_gdn.cu backends/cuda/op_test_nvfp4.cu
                  backends/cuda/op_test_head.cu backends/cuda/op_test_sampling.cu backends/cuda/op_test_layers.cu
-                 backends/cuda/op_test_dv.cu backends/cuda/op_test_vision.cu)
+                 backends/cuda/op_test_dv.cu backends/cuda/op_test_vision.cu backends/cuda/op_test_dspine.cu)
   target_link_libraries(cuda_op_test PRIVATE flyx_cuda_kernels)
   add_dependencies(cuda_op_test flyx_gemm_tables)  # op_test_gemm.cu reads the generated tables
   set_target_properties(cuda_op_test PROPERTIES CUDA_ARCHITECTURES "${FLYX_CUDA_ARCHS}")
@@ -489,6 +495,10 @@ if(TARGET flyx-cuda)
   flyx_add_golden_test(golden_cuda_gdn128 ARGS cuda gdn128)
   flyx_add_golden_test(golden_cuda_gdn128_unfused ARGS cuda gdn128 ENV FLYX_BACKEND_OPTIONS=fusion=0)
   flyx_add_golden_test(golden_cuda_window ARGS cuda window)
+  flyx_add_golden_test(golden_cuda_dspine ARGS cuda dspine)
+  flyx_add_golden_test(golden_cuda_dspine_unfused ARGS cuda dspine ENV FLYX_BACKEND_OPTIONS=fusion=0)
+  flyx_add_golden_test(golden_cuda_dspine_window ARGS cuda dspine_window)
+  flyx_add_golden_test(golden_cuda_qwen3_dspine ARGS cuda qwen3 ${ASSETS}/tiny_qwen3_dspine.flyx)
   # decode and verification attention on tensor cores for every row (by default only past rows_attention_from keys)
   flyx_add_golden_test(golden_cuda_rows_mma ARGS cuda nvfp4 ENV FLYX_BACKEND_OPTIONS=rows_attention_from=0)
   flyx_add_golden_test(golden_cuda_qwen3_rows_mma ARGS cuda qwen3 ENV FLYX_BACKEND_OPTIONS=rows_attention_from=0)

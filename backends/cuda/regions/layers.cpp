@@ -164,7 +164,82 @@ void head_logits(const HeadBlock& h, const RowView& v, int r0, int n, bool cert,
   }
 }
 
+// DSpine (backend_abi.h flyx_dspine_block, ops/dspine/ref.h): the rows the round's drafts need (no row reads a row
+// after it: a block of fewer rows drafts the same first drafts), each layer a Qwen3 layer attending causally (within
+// the window) then the bridge's write; the head's candidates for the rows after the anchor; and the walk, which redoes
+// the last write with the drafted token's code: every sender's message at once (the anchor's and every candidate's but
+// the last row's), its scores against the next row's candidates, the chain through the picks.
+void dspine_block(flyx_seq* s, const DFlashBlock& b, int width, const Launch& L, bool fused) {
+  const auto* m = s->m;
+  const auto& E = block<EmbedBlock>(m, b.embed);
+  const auto& head = block<HeadBlock>(m, b.head);
+  const KvBuf& kv = s->kv[size_t(b.kv)];
+  const DSpineBridge& br = b.dspine;
+  auto& d = s->ds;
+  const int B = std::min(b.block, width + 1), nr = B - 1;
+  const int H = b.hidden, nh = b.nh, nkv = b.nkv, hd = b.hd, I = b.inter, C = br.code, R = br.rank, K = br.topk;
+  const int nqkv = (nh + 2 * nkv) * hd, senders = 1 + (nr - 1) * K;
+  cudaStream_t st = L.st;
+  build_rows(s->P, nullptr, b.mask_token, s->dtok, B, st);
+  embed_tokens(E, s->dtok, s->dx, B, st);  // packed tables stay in host memory
+  for (int j = 0; j < b.layers(); ++j) {
+    const auto& l = block<DFlashLayer>(m, b.first_layer + j);
+    kv16* Kj = kv.k16(j);
+    kv16* Vj = kv.v16(j);
+    rmsnorm(s->dx, H, l.norm.w, l.norm.offset, l.norm.eps, s->dh, H, B, H, st);
+    gemm(s->dh, H, l.w_qkv, nqkv, H, s->dproj, s->ld_dproj, B, false, L);
+    attn_prep(s->dproj, s->ld_dproj, 0, nh * hd, (nh + nkv) * hd, l.q_norm.w, l.k_norm.w, l.q_norm.offset,
+              l.q_norm.eps, b.theta, hd, nh, nkv, hd, B, s->P, kPosPosition, false, s->dq, Kj, Vj, st);
+    const bool split_o = fused && !l.w_o.q8_inputs() && (nh * hd) % 64 == 0;
+    attention(s->dq, Kj, Vj, nh, nkv, hd, B, true, 0, 1.f / std::sqrt(float(hd)), s->P, nullptr, 0,
+              split_o ? nullptr : s->dact, s->ld_dact, s->own.part, kRoundSplits, L, 0, b.window);
+    if (split_o) gemm_presplit(l.w_o, H, nh * hd, s->dx, H, B, true, L);
+    else gemm(s->dact, s->ld_dact, l.w_o, H, nh * hd, s->dx, H, B, true, L);
+    rmsnorm(s->dx, H, l.post_norm.w, l.post_norm.offset, l.post_norm.eps, s->dh, H, B, H, st);
+    gemm(s->dh, H, l.w_gu, 2 * I, H, s->dproj, s->ld_dproj, B, false, L);
+    if (fused) {
+      swiglu_split(s->dproj, s->ld_dproj, I, B, L, l.w_down.q8_inputs());
+      gemm_presplit(l.w_down, H, I, s->dx, H, B, true, L);
+    } else {
+      swiglu(s->dproj, s->ld_dproj, I, s->dact, s->ld_dact, B, st);
+      gemm(s->dact, s->ld_dact, l.w_down, H, I, s->dx, H, B, true, L);
+    }
+    // The bridge's write; the last one's rows before it, their rms and gate projections are what the walk redoes.
+    const bool last = j == b.layers() - 1;
+    dspine_normalize(s->dx, H, br.eps, B, s->dh, d.rms, st);
+    gemm(s->dh, H, l.read, C, H, d.codes, C, B, false, L);
+    dspine_codes(d.codes, C, br.codebook, s->P, br.eps, B, st);
+    gemm(d.codes, C, br.packed, 3 * R, C, d.gates, 3 * R, B, false, L);
+    dspine_message(d.gates, R, br.gate_bias, B, d.msg, last ? d.g : nullptr, st);
+    gemm(d.msg, R, l.write, H, R, s->dtmp, H, B, false, L);
+    dspine_apply(s->dx, s->dtmp, d.rms, H, B, last ? d.before : nullptr, st);
+  }
+  rmsnorm(s->dx + H, H, b.norm.w, b.norm.offset, b.norm.eps, s->dh, H, nr, H, st);
+  draft_head_pick(head, s->dh, nr, K, s->cand, s->unary, s, L, s->draft_prob, s->draft_margin);
+  // The walk's GEMMs, up to (block - 1) topk rows: the round kernels 64 rows at a time, each row's inputs as three bf16
+  // parts (float32's precision: the scores' differences are a message's against another's; bf16 inputs moved them by
+  // 5e-4 of a score, more than a near tie), the weights read once a 64 rows.
+  Launch walk = L;
+  walk.round_rows = true;
+  walk.draft = false;
+  auto rows64 = [&](const float* x, int ldx, const Lin& w, int N, int K_, float* y, int ldy, int rows) {
+    for (int r0 = 0; r0 < rows; r0 += 64)
+      gemm(x + size_t(r0) * ldx, ldx, w, N, K_, y + size_t(r0) * ldy, ldy, std::min(64, rows - r0), false, walk);
+  };
+  if (head.wb.data) embed_blocks(s->cand, head.wb, H, d.heads, nr * K, st);  // a packed head's rows as float32
+  dspine_heads(s->cand, head.wb.data ? nullptr : head.w, b.norm.w, d.before, H, K, nr * K, d.heads, d.base, st);
+  rows64(d.heads, H, br.write_t, R, H, d.tg, R, nr * K);
+  dspine_senders(s->P, s->cand, br.codebook, C, senders, d.codes, st);
+  rows64(d.codes, C, br.pv, 2 * R, C, d.gates, 2 * R, senders);
+  dspine_scores(d.g, d.gates, br.gate_bias, d.tg, d.base, d.rms, R, K, senders, d.pick, st);
+  dspine_walk(s->P, s->cand, d.pick, K, std::min(width, nr), s->oracle, s->drafts, st);
+}
+
 void draft_block(flyx_seq* s, const DFlashBlock& b, int width, const Launch& L, bool tree, bool fused) {
+  if (b.dspine) {
+    if (tree) throw std::logic_error("cuda: DSpine drafts chains, not trees");  // lower refuses its tree rounds
+    return dspine_block(s, b, width, L, fused);
+  }
   const auto* m = s->m;
   const auto& E = block<EmbedBlock>(m, b.embed);
   const auto& head = block<HeadBlock>(m, b.head);

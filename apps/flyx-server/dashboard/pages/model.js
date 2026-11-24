@@ -77,7 +77,7 @@ function FitTag({ size }) {
   return html`<span class=${"tag2 " + (fits ? "ok" : "bad")} title=${t(title)}>${t(fits ? "fits" : "too big")}</span>`;
 }
 
-const drafterLabel = (k) => k === "mtp" ? "MTP" : k === "dflash2" ? "DFlash2" : k;
+const drafterLabel = (k) => ({ mtp: "MTP", dflash2: "DFlash2", dspine: "DSpine" })[k] || k;
 
 // What is served and its state, its facts, a fetch's or a load's progress, an error.  With nothing
 // served it is the view's whole content: `again` loads the model the server remembers, `browse` shows the library.
@@ -632,7 +632,7 @@ export function ModelPage({ active, libraryAsked, currentAsked }) {
   // its default; else what a model brings along.
   function defaultDrafter() {
     if (loadedWant && loadedWant.speculative !== false && !loadedWant.drafter && !loadedWant.drafters?.length) {
-      const list = draftersOf(L).map((d) => (d.kind === "mtp" ? "MTP" : d.kind === "dflash2" ? "DFlash2" : d.kind) + " · " +
+      const list = draftersOf(L).map((d) => drafterLabel(d.kind) + " · " +
         (d.from === "model file" ? t("the model file's own layer") : t("from " + d.from + (d.size ? " (" + gb(d.size) + " GB)" : ""))));
       if (!list.length && model.drafter) list.push(model.drafter.toUpperCase() + " · " + t("the model file's own layer"));
       return list.length ? { tag: "in use", tone: "ok", lines: list } : { tag: "none", tone: "", lines: [t("This model loaded no drafter: plain decoding.")] };
