@@ -252,6 +252,7 @@ void test_sample();
 void test_select();
 void test_stop_decide();
 void test_dv();
+void test_dspine();
 void test_dv_selector_tables(int vocab, int hidden, int rank);
 void test_canvas_input(int slots, int hidden);
 void test_canvas_stats(int slots, int vocab, int hidden, int rank);

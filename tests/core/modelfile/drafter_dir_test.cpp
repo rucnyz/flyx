@@ -1,8 +1,9 @@
 // Copyright 2026 The flyx Authors. SPDX-License-Identifier: Apache-2.0
-// A DFlash2 drafter read from its authors' directory (config.json and safetensors) is what
+// A block drafter read from its authors' directory (config.json and safetensors) is what
 // python/convert makes of it as a drafter file: the same "draft" description and the same tensors, byte for byte.
 // The tiny assets hold the drafter as z-lab publishes it (hf_draft_zlab), with a sliding window (hf_draft_window)
-// and in speculators' layout (hf_draft), and python/convert's files of the first two.
+// and in speculators' layout (hf_draft), and python/convert's files of the first two; and a DSpine drafter as
+// tencent publishes it (hf_dspine) with python/convert's file of it.
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -64,6 +65,7 @@ int main(int argc, char** argv) {
   same(dir, model, "hf_draft_zlab", "tiny_draft.flyx");
   same(dir, model, "hf_draft_window", "tiny_draft_window.flyx");
   same(dir, model, "hf_draft", "tiny_draft.flyx", false);  // speculators' layout: the same drafter
+  same(dir, model, "hf_dspine", "tiny_draft_dspine.flyx");   // DSpine, its stacked bridge tensors cut per layer
   {
     flyx::ModelFile f;
     std::string err;

@@ -1,6 +1,6 @@
 # flyx
 
-> Low-latency local LLM and multimodal VLM inference engine for single-user NVIDIA GPUs (CUDA 13, C++/CUDA, Apache-2.0) with bitwise-exact speculative decoding (MTP, DFlash2, DV, prompt lookup), native GGUF and `.flyx` support, companion `mmproj` vision encoding with disk/host/GPU weight placement, tiered GPU/RAM/disk long-context KV caches with 2-bit StrataFlux attention, and OpenAI / Anthropic HTTP APIs.
+> Low-latency local LLM and multimodal VLM inference engine for single-user NVIDIA GPUs (CUDA 13, C++/CUDA, Apache-2.0) with bitwise-exact speculative decoding (MTP, DFlash2, DSpine, DV, prompt lookup), native GGUF and `.flyx` support, companion `mmproj` vision encoding with disk/host/GPU weight placement, tiered GPU/RAM/disk long-context KV caches with 2-bit StrataFlux attention, and OpenAI / Anthropic HTTP APIs.
 
 Start here when deploying, integrating, or modifying `flyx`. Each document below is the single source of truth for its domain.
 

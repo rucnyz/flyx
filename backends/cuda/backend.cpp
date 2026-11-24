@@ -700,7 +700,8 @@ int open_model(const flyx_model_desc* desc, const flyx_open_options* opts, flyx_
     // From the description: a drafter's layers may come before its block, and run out of memory before it is bound.
     bool drafter = false;
     for (int i = 0; i < desc->n_blocks; ++i)
-      for (int k : {FLYX_BLOCK_MTP, FLYX_BLOCK_DFLASH2, FLYX_BLOCK_DFLASH2_LAYER, FLYX_BLOCK_DV, FLYX_BLOCK_DV_LAYER})
+      for (int k : {FLYX_BLOCK_MTP, FLYX_BLOCK_DFLASH2, FLYX_BLOCK_DFLASH2_LAYER, FLYX_BLOCK_DV, FLYX_BLOCK_DV_LAYER,
+                    FLYX_BLOCK_DSPINE, FLYX_BLOCK_DSPINE_LAYER})
         drafter = drafter || desc->blocks[i].kind == k;
     char head[160] = "Not enough VRAM while loading weights.";
     if (has_others)

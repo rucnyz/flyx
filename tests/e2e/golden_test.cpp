@@ -40,6 +40,9 @@ using json = nlohmann::json;
 namespace {
 
 int g_fail = 0;
+// The block drafter the tiny model holds (its golden file's "block_drafter"): DFlash2, or DSpine in place of it.
+std::string g_block = "dflash2";
+std::string block_label() { return g_block == "dspine" ? "DSpine" : "DFlash2"; }
 
 void check(bool ok, const std::string& what) {
   std::printf("  %-4s %s\n", ok ? "ok" : "FAIL", what.c_str());
@@ -554,7 +557,7 @@ std::vector<flyx_round_result> tree_rounds(Engine* e, const std::vector<int32_t>
 constexpr int kReferenceWidth = -2;
 
 std::unique_ptr<Engine> make(const std::string& path, const std::string& backend, bool spec,
-                             const std::string& drafter = "dflash2", bool kv_fp8 = false,
+                             const std::string& drafter = g_block, bool kv_fp8 = false,
                              const std::string& backend_options = "", bool lookup = false, int max_ctx = 512,
                              int width = kReferenceWidth, bool draft_trees = false, int kv_gpu = -1,
                              const std::string& kv_method = "exact", int kv_copy_gpu = -1, int prefill_chunk = 16,
@@ -1109,8 +1112,8 @@ void wide_block(const std::string& model, const std::string& backend,
     return;
   }
   auto plain = make(model, backend, false);
-  auto fixed = make(model, backend, true, "dflash2", false, "", false, 512, FLYX_MAX_ROWS - 1);
-  auto chosen = make(model, backend, true, "dflash2", false, "", false, 512, -1);
+  auto fixed = make(model, backend, true, g_block, false, "", false, 512, FLYX_MAX_ROWS - 1);
+  auto chosen = make(model, backend, true, g_block, false, "", false, 512, -1);
   const auto& w = chosen->widths();
   check(std::find(w.begin(), w.end(), FLYX_MAX_ROWS - 1) != w.end(),
         "wide block: DFlash2 rounds of 15 drafts from a block of 8 among the chosen widths");
@@ -1200,7 +1203,7 @@ void kv_in_host_memory(const std::string& model, const std::string& backend, con
   };
   {
     auto plain = make(model, backend, false, "", false, "", false, 512, kReferenceWidth, false, 0);
-    auto spec = make(model, backend, true, "dflash2", false, "", false, 512, kReferenceWidth, false, 0);
+    auto spec = make(model, backend, true, g_block, false, "", false, 512, kReferenceWidth, false, 0);
     auto mtp = make(model, backend, true, "mtp", false, backend == "cuda" ? "draft_weights=exact" : "", false, 512,
                     kReferenceWidth, false, 0);
     check(backend != "cuda" || (plain->kv_layout().device_positions == 0 && plain->kv_layout().max_ctx == 512),
@@ -1223,7 +1226,7 @@ void kv_in_host_memory(const std::string& model, const std::string& backend, con
     snapshot_through_host(spec.get(), plain.get(), prompt, "snapshot, K/V in host memory", backend == "cpu_ref");
     auto gpu8 = make(model, backend, false, "", true);
     auto plain8 = make(model, backend, false, "", true, "", false, 512, kReferenceWidth, false, 0);
-    auto spec8 = make(model, backend, true, "dflash2", true, "", false, 512, kReferenceWidth, false, 0);
+    auto spec8 = make(model, backend, true, g_block, true, "", false, 512, kReferenceWidth, false, 0);
     const auto t8 = tokens(gpu8.get(), prompt, N);
     check(tokens(plain8.get(), prompt, N) == t8 && tokens(spec8.get(), prompt, N) == t8,
           "K/V all in host memory, fp8: the GPU's tokens, plain and DFlash2");
@@ -1232,7 +1235,7 @@ void kv_in_host_memory(const std::string& model, const std::string& backend, con
   const int ctx = 20480;
   auto gpu = make(model, backend, false, "", false, "", false, ctx);
   auto plain = make(model, backend, false, "", false, "", false, ctx, kReferenceWidth, false, 16384);
-  auto spec = make(model, backend, true, "dflash2", false, "", false, ctx, kReferenceWidth, false, 16384);
+  auto spec = make(model, backend, true, g_block, false, "", false, ctx, kReferenceWidth, false, 16384);
   // The copies to the staging right before each attention, not beside the layers before it: the same tokens.
   auto inline_copies = make(model, backend, false, "", false, "stage_ahead=0", false, ctx, kReferenceWidth, false, 16384);
   const int at = plain->kv_layout().device_positions;
@@ -1338,14 +1341,14 @@ void strata_rounds(const std::string& model, const std::string& backend, const s
   for (const char* method : {"strata", "strata:3"})
     for (bool fp8 : {false, true}) {
       auto plain = make(model, backend, false, "", fp8, narrow, false, 512, kReferenceWidth, false, -1, method);
-      auto spec = make(model, backend, true, "dflash2", fp8, narrow, false, 512, kReferenceWidth, false, -1, method);
+      auto spec = make(model, backend, true, g_block, fp8, narrow, false, 512, kReferenceWidth, false, -1, method);
       auto mtp = make(model, backend, true, "mtp", fp8, narrow, false, 512, kReferenceWidth, false, -1, method);
-      auto host = make(model, backend, true, "dflash2", fp8, narrow, false, 512, kReferenceWidth, false, 0, method);
+      auto host = make(model, backend, true, g_block, fp8, narrow, false, 512, kReferenceWidth, false, 0, method);
       // every position in host memory, plain decoding: with FP8 caches the pairs re-read are kept on the device,
       // read from there the rounds after
       auto host_plain = make(model, backend, false, "", fp8, narrow, false, 512, kReferenceWidth, false, 0, method);
       // the copy in host memory too, every layer's or one layer's on the GPU
-      auto copy_host = make(model, backend, true, "dflash2", fp8, narrow, false, 512, kReferenceWidth, false, 0, method,
+      auto copy_host = make(model, backend, true, g_block, fp8, narrow, false, 512, kReferenceWidth, false, 0, method,
                             0);
       auto copy_one = make(model, backend, true, "mtp", fp8, narrow, false, 512, kReferenceWidth, false, 0, method, 1);
       const auto t = tokens(plain.get());
@@ -1357,7 +1360,7 @@ void strata_rounds(const std::string& model, const std::string& backend, const s
             std::string(method) + (fp8 ? ", fp8" : ", binary16") +
                 ": the copy in host memory, read through stagings: DFlash2 and MTP decode == plain decode");
       // the selection over chunks of 8 pairs: the pick of one chunk, so the same tokens
-      auto chunked = make(model, backend, true, "dflash2", fp8, narrow + ",strata_chunk=8", false, 512,
+      auto chunked = make(model, backend, true, g_block, fp8, narrow + ",strata_chunk=8", false, 512,
                           kReferenceWidth, false, -1, method);
       check(tokens(chunked.get()) == t, std::string(method) + (fp8 ? ", fp8" : ", binary16") +
                                             ": the selection in chunks of 8 pairs picks what one chunk picks");
@@ -1381,11 +1384,12 @@ void strata_rounds(const std::string& model, const std::string& backend, const s
     };
     for (const char* method : {"strata", "strata:3"}) {
       auto plain = make(model, backend, false, "", true, narrow, false, 512, kReferenceWidth, false, -1, method);
-      auto spec = make(model, backend, true, "dflash2", true, narrow, false, 512, kReferenceWidth, false, -1, method);
+      auto spec = make(model, backend, true, g_block, true, narrow, false, 512, kReferenceWidth, false, -1, method);
       auto mtp = make(model, backend, true, "mtp", true, narrow, false, 512, kReferenceWidth, false, -1, method);
       const auto t = across(plain.get());
       check(t.size() == size_t(more) && across(spec.get()) == t && across(mtp.get()) == t,
-            std::string(method) + ": rounds across 128 and 256 keys: DFlash2 and MTP decode == plain decode");
+            std::string(method) + ": rounds across 128 and 256 keys: " + block_label() +
+                " and MTP decode == plain decode");
     }
   }
   {  // auto: exact rows below the switch, the copy's from it, in the middle of the reply here. Before
@@ -1395,14 +1399,14 @@ void strata_rounds(const std::string& model, const std::string& backend, const s
     const std::string at = narrow + ",strata_from=" + std::to_string(from);
     for (bool fp8 : {false, true}) {
       auto plain = make(model, backend, false, "", fp8, at, false, 512, kReferenceWidth, false, -1, "auto");
-      auto spec = make(model, backend, true, "dflash2", fp8, at, false, 512, kReferenceWidth, false, -1, "auto");
+      auto spec = make(model, backend, true, g_block, fp8, at, false, 512, kReferenceWidth, false, -1, "auto");
       auto mtp = make(model, backend, true, "mtp", fp8, at, false, 512, kReferenceWidth, false, -1, "auto");
-      auto chosen = make(model, backend, true, "dflash2", fp8, at, false, 512, -1, false, -1, "auto");
+      auto chosen = make(model, backend, true, g_block, fp8, at, false, 512, -1, false, -1, "auto");
       auto exact = make(model, backend, false, "", fp8, "", false, 512, kReferenceWidth, false, -1);
       // the K/V in host memory: the copy moves between its homes as the rounds cross the switch
-      auto host = make(model, backend, true, "dflash2", fp8, at, false, 512, kReferenceWidth, false, 0, "auto");
+      auto host = make(model, backend, true, g_block, fp8, at, false, 512, kReferenceWidth, false, 0, "auto");
       // and the copy in host memory for good: read there about the switch, through stagings past it
-      auto copy_host = make(model, backend, true, "dflash2", fp8, at, false, 512, kReferenceWidth, false, 0, "auto",
+      auto copy_host = make(model, backend, true, g_block, fp8, at, false, 512, kReferenceWidth, false, 0, "auto",
                             0);
       const auto t = tokens(plain.get()), te = tokens(exact.get());
       check(t.size() == size_t(N) && te.size() == size_t(N) &&
@@ -1506,8 +1510,8 @@ void strata_rounds(const std::string& model, const std::string& backend, const s
       }
   }
   {  // a snapshot carries the copy with the cache: loaded, the tokens of a session that prefilled it all
-    auto host = make(model, backend, true, "dflash2", true, narrow, false, 512, kReferenceWidth, false, 0, "strata");
-    auto exact = make(model, backend, true, "dflash2", true, "", false, 512, kReferenceWidth, false, 0);
+    auto host = make(model, backend, true, g_block, true, narrow, false, 512, kReferenceWidth, false, 0, "strata");
+    auto exact = make(model, backend, true, g_block, true, "", false, 512, kReferenceWidth, false, 0);
     snapshot_through_host(host.get(), exact.get(), prompt, "snapshot, strata", false);
   }
   // Capture with a whole prefix and a partial 16-position tile, then reuse the same sequence for a much shorter
@@ -1614,7 +1618,7 @@ void strata_rounds(const std::string& model, const std::string& backend, const s
             make(model, backend, true, "mtp", fp8, base + ",pageable_kv=on", false, 512, kReferenceWidth, false, 0,
                  method, 0, 48);
         auto paged_df =
-            make(model, backend, true, "dflash2", fp8, base + ",pageable_kv=on", false, 512, kReferenceWidth, false, 0,
+            make(model, backend, true, g_block, fp8, base + ",pageable_kv=on", false, 512, kReferenceWidth, false, 0,
                  method, 0, 48);
         flyx_seq_size sz_pin{}, sz_pg{};
         const flyx_seq_layout lp = pinned->kv_layout(), lq = paged->kv_layout();
@@ -1632,7 +1636,8 @@ void strata_rounds(const std::string& model, const std::string& backend, const s
         check(tpin.size() == size_t(N / 2) * 2 && tpg == tpin && tmtp == tpin && tdf == tpin && !lpin.empty() &&
                   lpg == lpin,
               std::string("pageable_kv=on, ") + method + (fp8 ? ", fp8" : ", binary16") +
-                  ": windowed prefill plain matches pinned logits bit-for-bit; MTP and DFlash2 match tokens");
+                  ": windowed prefill plain matches pinned logits bit-for-bit; MTP and " + block_label() +
+                  " match tokens");
         // Short tail prefill past stage_window (<=16 rows): uses windowed attention_split (SplitWindow) and must
         // match pinned host KV bit-for-bit across plain, MTP, and DFlash2.
         std::vector<float> spin, spg, smtp, sdf;
@@ -1641,7 +1646,8 @@ void strata_rounds(const std::string& model, const std::string& backend, const s
         check(stpg.size() == size_t(N / 2) * 2 && stpg == stpin && stmtp == stpg && stdf == stpg && !spg.empty() &&
                   spg == spin,
               std::string("pageable_kv=on, ") + method + (fp8 ? ", fp8" : ", binary16") +
-                  ": short-tail windowed prefill matches pinned tokens and logits bit-for-bit; MTP/DFlash2 match");
+                  ": short-tail windowed prefill matches pinned tokens and logits bit-for-bit; MTP/" + block_label() +
+                  " match");
         // The same with tails of 273 to 280 keys, whose splits are 96 keys: one ends inside a window of 64, and that
         // launch holds both the split that reads the state the launch before left and the one that leaves its own.
         std::vector<float> xpin, xpg, xmtp, xdf;
@@ -1873,10 +1879,10 @@ void rows_on_tensor_cores(const std::string& model, const std::string& backend, 
   for (const Config& c : configs) {
     const std::string opt = all + c.extra;
     auto plain = make(model, backend, false, "", c.fp8, opt, false, 512, kReferenceWidth);
-    auto spec = make(model, backend, true, "dflash2", c.fp8, opt, false, 512, kReferenceWidth);
+    auto spec = make(model, backend, true, g_block, c.fp8, opt, false, 512, kReferenceWidth);
     auto mtp = make(model, backend, true, "mtp", c.fp8, opt, false, 512, kReferenceWidth);
-    auto chosen = make(model, backend, true, "dflash2", c.fp8, opt, false, 512, -1);
-    auto host = make(model, backend, true, "dflash2", c.fp8, opt, false, 512, kReferenceWidth, false, 0);
+    auto chosen = make(model, backend, true, g_block, c.fp8, opt, false, 512, -1);
+    auto host = make(model, backend, true, g_block, c.fp8, opt, false, 512, kReferenceWidth, false, 0);
     const auto t = tokens(plain.get());
     check(t.size() == size_t(N) && tokens(spec.get()) == t && tokens(mtp.get()) == t && tokens(chosen.get()) == t &&
               tokens(host.get()) == t,
@@ -1894,7 +1900,7 @@ void rows_on_tensor_cores(const std::string& model, const std::string& backend, 
 void drafted_trees(const std::string& model, const std::string& backend, const std::vector<int32_t>& prompt,
                    const std::vector<int32_t>& want, const std::vector<int32_t>& oracle) {
   const int N = static_cast<int>(want.size());
-  auto trees = make(model, backend, true, "dflash2", false, "", false, 512, -1, true);
+  auto trees = make(model, backend, true, g_block, false, "", false, 512, -1, true);
   std::vector<size_t> turns;
   for (size_t i = 0; i < trees->widths().size(); ++i)
     if (trees->round_trees()[i]) turns.push_back(i);
@@ -3019,8 +3025,8 @@ int plain_only(const json& g, const std::string& model, const std::string& backe
     // and, made when its rounds are lowered, its token tables A E and B E, [vocab][rank] float32 each.
     flyx_memory_info with{}, without{};
     const Engine &a = *drafting[0], &b = *drafting[1];
-    if (a.api()->memory && a.api()->memory(a.bmodel(), &with) == 0 && b.api()->memory(b.bmodel(), &without) == 0 &&
-        with.weights > 0) {
+    if (dv_file && a.api()->memory && a.api()->memory(a.bmodel(), &with) == 0 &&
+        b.api()->memory(b.bmodel(), &without) == 0 && with.weights > 0) {
       uint64_t want = 0;
       const flyx_model_desc& desc = a.model().desc();
       for (int i = 0; i < desc.n_weights; ++i) {
@@ -3588,6 +3594,7 @@ int main(int argc, char** argv) {
     return 1;
   }
   const std::string model = args.size() > 4 ? args[4] : dir + "/tiny" + variant + ".flyx";
+  g_block = g.value("block_drafter", std::string("dflash2"));
   if (const char* which = std::getenv("FLYX_TEST_DEVICE_MEMORY")) {
     const auto prompt = g["cases"][0]["prompt"].get<std::vector<int32_t>>();
     const std::string mode = which;
@@ -3611,7 +3618,7 @@ int main(int argc, char** argv) {
   // Drafts are compared with the reference's from engines that draft from
   // exact weights; the others draft from NVFP4 copies (the output must not
   // change, only the drafts may).
-  auto spec_exact = backend == "cpu_ref" ? nullptr : make(model, backend, true, "dflash2", false, "draft_weights=exact");
+  auto spec_exact = backend == "cpu_ref" ? nullptr : make(model, backend, true, g_block, false, "draft_weights=exact");
   auto mtp = make(model, backend, true, "mtp", false, backend == "cuda" ? "draft_weights=exact" : "");
   auto mtp_q = make(model, backend, true, "mtp");
   // Every drafter the model has: rounds of each at a fixed width (MTP 7, DFlash2 15), and the
@@ -3619,8 +3626,8 @@ int main(int argc, char** argv) {
   auto both = make(model, backend, true, "all");
   auto both_chosen = make(model, backend, true, "all", false, "", false, 512, -1);
   // FP8 K/V cache: no reference for it, but drafting must still not change the output.
-  auto plain8 = make(model, backend, false, "dflash2", true);
-  auto spec8 = make(model, backend, true, "dflash2", true);
+  auto plain8 = make(model, backend, false, g_block, true);
+  auto spec8 = make(model, backend, true, g_block, true);
   auto mtp8 = make(model, backend, true, "mtp", true);
   std::printf("backend %s, drafts per round %d\n", spec->backend_name().c_str(), spec->width());
   // Without a drafter whose state follows its own rounds only, the rounds are timed once at load at the prompt's
@@ -3655,14 +3662,14 @@ int main(int argc, char** argv) {
       init_checked(c8);
       const auto t8 = gen(a8, prompt, N).tokens;
       check(gen(b8, prompt, N).tokens == t8 && gen(c8, prompt, N).tokens == t8,
-            "fp8 kv cache: DFlash2 and MTP decode == plain decode");
+            "fp8 kv cache: " + block_label() + " and MTP decode == plain decode");
     }
 
     Session ss(spec.get());
     init_checked(ss);
     std::vector<flyx_round_result> trace;
     o = gen(ss, prompt, N, &trace);
-    check(o.tokens == want, "DFlash2 decode");
+    check(o.tokens == want, block_label() + " decode");
     int same = 0, total = 0;
     drafts_equal(trace, c["rounds"], &same, &total);
     std::printf("       drafts equal to the reference: %d / %d\n", same, total);
@@ -3675,7 +3682,7 @@ int main(int argc, char** argv) {
       const bool same_tokens = gen(sx, prompt, N, &tx).tokens == want;
       drafts_equal(tx, c["rounds"], &same, &total);
       check(same_tokens && total > 0 && same * 10 >= total * 9,
-            "DFlash2 from exact weights: the reference's tokens, its drafts " + std::to_string(same) + " / " +
+            block_label() + " from exact weights: the reference's tokens, its drafts " + std::to_string(same) + " / " +
                 std::to_string(total));
     }
 
@@ -3816,7 +3823,7 @@ int main(int argc, char** argv) {
             "relaxed acceptance, min-p 1e-37: more drafts accepted (MTP " + std::to_string(loose_m) + " against " +
                 std::to_string(exact_m) + ", DFlash2 " + std::to_string(loose_d) + " against " +
                 std::to_string(exact_d) + ")");
-      drafted_trees(model, backend, prompt, want, oracle);
+      if (g_block == "dflash2") drafted_trees(model, backend, prompt, want, oracle);  // DSpine drafts chains only
     }
 
     // MTP drafter: same tokens; drafts equal to the reference's; state kept
@@ -3876,7 +3883,7 @@ int main(int argc, char** argv) {
     // tokens, greedy, and plain decoding's, sampled.
     {
       std::vector<size_t> turns;  // the MTP layer's round, then DFlash2's
-      for (const std::string name : {"mtp", "dflash2"})
+      for (const std::string name : {std::string("mtp"), g_block})
         for (size_t i = 0; i < both->widths().size(); ++i)
           if (both->round_drafters()[i] >= 0 && name == both->model().drafter_name(both->round_drafters()[i]))
             turns.push_back(i);
@@ -4058,7 +4065,7 @@ int main(int argc, char** argv) {
     // greedy and sampled.
     {
       auto mtp_l = make(model, backend, true, "mtp", false, "", true);
-      auto spec_l = make(model, backend, true, "dflash2", false, "", true);
+      auto spec_l = make(model, backend, true, g_block, false, "", true);
       auto plain_l = make(model, backend, true, "none", false, "", true);  // no drafter: lookup rounds only
       std::vector<int32_t> twice = prompt;  // a prompt that repeats itself
       twice.insert(twice.end(), prompt.begin(), prompt.end());

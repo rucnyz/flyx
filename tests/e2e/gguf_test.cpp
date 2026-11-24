@@ -294,7 +294,7 @@ void split_mtp(const std::string& dir, const std::string& backend) {
 //   same files.  (With 8-bit inputs, a group of 32 scaled by its largest, one float32 step can move the target's
 //   features enough to turn a near tie among the drafts, and the walk through the block carries a turned draft
 //   on to every later one.)
-// * A drafter file is no model; a drafter made for another model is refused; a model takes one DFlash2 drafter.
+// * A drafter file is no model; a drafter made for another model is refused; a model takes one block drafter.
 void dflash_file(const std::string& dir, const std::string& backend) {
   const std::string drafter = dir + "/tiny_draft.flyx", window = dir + "/tiny_draft_window.flyx";
   const std::string drafter_gguf = dir + "/tiny_draft.gguf", window_gguf = dir + "/tiny_draft_window.gguf";
@@ -439,7 +439,7 @@ void dflash_file(const std::string& dir, const std::string& backend) {
         "a drafter made for another model (twice as wide) is refused (" + why + ")");
   why = refusal(dir + "/tiny_gguf.gguf", backend,
                 {.speculative = true, .drafter = "dflash2", .drafter_files = {drafter, window}});
-  check(why.find("DFlash2 drafter already") != std::string::npos, "a model takes one DFlash2 drafter (" + why + ")");
+  check(why.find("a block drafter already") != std::string::npos, "a model takes one block drafter (" + why + ")");
 }
 
 // NVFP4 weights with NVFP4 inputs in passes of more than 16 rows against the float64 backend, which rounds the same

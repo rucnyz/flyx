@@ -1,13 +1,14 @@
 # Copyright 2026 The flyx Authors. SPDX-License-Identifier: Apache-2.0
-"""HuggingFace Qwen3.5 (+ optional DFlash2 drafter), Qwen3 or Llama (+ optional DV drafter) -> one .flyx file.
+"""HuggingFace Qwen3.5 (+ optional DFlash2 or DSpine drafter), Qwen3 or Llama (+ optional DV) -> one .flyx file.
 
     python -m flyx_convert --model Qwen3.5-4B/ --draft Qwen3.5-4B-DFlash2/ -o qwen35-4b.flyx
     python -m flyx_convert --draft Qwen3.8-27B-DFlash2/ -o qwen38-27b-dflash2.flyx   # a drafter file
+    python -m flyx_convert --draft Qwen3.8-27B-DSpine-b16/ -o qwen38-27b-dspine.flyx  # a DSpine drafter file
     python -m flyx_convert --model MiniCPM5-1B/ -o minicpm5-1b.flyx                     # Llama, no drafter
     python -m flyx_convert --model MiniCPM5-1B/ --dv minicpm5-dv/ -o minicpm5-1b-dv-res2.flyx  # Llama with DV
     python -m flyx_convert --model MiniCPM5-1B/ --lora minicpm5-vlora/ -o minicpm5-1b-vlora.flyx  # its V-LoRA
 
-A drafter file holds a DFlash2 drafter alone: the engine takes
+A drafter file holds a block drafter (DFlash2 or DSpine, dspine.py) alone: the engine takes
 it beside a model of any format, a GGUF included (--drafter-file).
 
 A DV drafter (bifill-dv's canvas and selector, docs/design/dv.md) comes from
@@ -41,6 +42,7 @@ import sys
 
 import numpy as np
 
+from .dspine import canonical_dspine_config, check_dspine, dspine_tensors, is_dspine
 from .dv import add_dv
 from .fileformat import NUMPY, Writer
 from .lora import add_lora, has_lora
@@ -188,7 +190,8 @@ def arch_of(hf_cfg: dict) -> str:
 
 
 def canonical_draft_config(sc: dict, target: dict | None) -> dict:
-    """A DFlash2 drafter's config, from either way it is published:
+    """A block drafter's config: a DSpine drafter's (dspine.py), or a DFlash2 drafter's, from either way it is
+    published:
       speculators' ("speculators_model_type": "dflash2"; the layers under "transformer_layer_config";
         aux_hidden_state_layer_ids: indices into the target's hidden states, 0 the embedding);
       z-lab's and Inco's ("architectures": ["DFlash2DraftModel"], "dflash_config"; target_layer_ids: the target
@@ -196,6 +199,8 @@ def canonical_draft_config(sc: dict, target: dict | None) -> dict:
     taps: the residual stream after that many target layers.  window: each position attends to the positions less
     than that far from it, both ways (0: all).  target: the model's canonical config, or None for a drafter file of
     its own (the engine checks it against the model it is given with; "target" below names what it was made for)."""
+    if is_dspine(sc):
+        return canonical_dspine_config(sc, target)
     if "dflash_config" in sc:
         if "DFlash2DraftModel" not in sc.get("architectures", []):
             raise ValueError(f"drafter architectures {sc.get('architectures')!r}: DFlash2DraftModel is supported")
@@ -374,8 +379,10 @@ def convert(model_dir: str, out: str, draft_dir: str | None = None, log=print, a
     tc = _text_config(hf_cfg)
     arch = arch_of(hf_cfg)
     cfg = canonical_target_config(tc) if arch == "qwen35" else canonical_dense_config(tc)
-    if arch != "qwen35" and draft_dir:
-        raise ValueError("a DFlash2 drafter is only supported for Qwen3.5")
+    if arch == "llama" and draft_dir:
+        raise ValueError("a block drafter is only supported for Qwen3.5 (DFlash2, DSpine) and Qwen3 (DSpine)")
+    if arch == "qwen3" and draft_dir and not is_dspine(_read_config(os.path.join(draft_dir, "config.json"))):
+        raise ValueError("a DFlash2 drafter is only supported for Qwen3.5 (a Qwen3 model takes a DSpine drafter)")
     if arch != "llama" and dv_dir:
         raise ValueError("a DV drafter is only supported for Llama (MiniCPM5)")
     if lora_dir and has_lora(dv_dir):
@@ -459,15 +466,22 @@ def convert(model_dir: str, out: str, draft_dir: str | None = None, log=print, a
     if lora:  # a reader that dropped the adapters would decode the plain model: format 2, which earlier builds refuse
         w.meta["requires"] = ["lora"]
     w.write(out)
-    log(f"wrote {out}: {len(w.entries)} entries, draft={'dflash2' if draft else 'dv' if dv else 'none'}, "
+    log(f"wrote {out}: {len(w.entries)} entries, draft={draft['kind'] if draft else 'dv' if dv else 'none'}, "
         f"mtp={mtp['layers'] if mtp else 0} layer(s), lora={lora['rank'] if lora else 'none'}, "
         f"weights={quant['format'] if quant else 'as stored'}, eos={eos}")
 
 
 def _add_draft(w: Writer, draft_dir: str, target: dict | None, log) -> dict:
-    """A DFlash2 drafter's tensors as ``draft.`` names; its canonical config (canonical_draft_config)."""
+    """A block drafter's tensors as ``draft.`` names; its canonical config (canonical_draft_config)."""
     draft = canonical_draft_config(_read_config(os.path.join(draft_dir, "config.json")), target)
     dseen = set()
+    if draft["kind"] == "dspine":
+        with SafeTensors(draft_dir) as dst:
+            for canon, dt, arr in dspine_tensors(dst.names(), dst.read, draft, log):
+                w.add_tensor("draft." + canon, dt, arr.shape, np.ascontiguousarray(arr))
+                dseen.add(canon)
+        check_dspine(draft, dseen)
+        return draft
     with SafeTensors(draft_dir) as dst:
         for name in dst.names():
             inner = name[len("model."):] if name.startswith("model.") else name
@@ -485,14 +499,15 @@ def _add_draft(w: Writer, draft_dir: str, target: dict | None, log) -> dict:
 
 
 def convert_draft(draft_dir: str, out: str, log=print) -> None:
-    """A DFlash2 drafter on its own -> a drafter file: the engine takes it beside a model of any
+    """A block drafter (DFlash2, DSpine) on its own -> a drafter file: the engine takes it beside a model of any
     format (--drafter-file), and checks it against that model (the "target" its config names)."""
     w = Writer()
     draft = _add_draft(w, draft_dir, None, log)
     w.meta = {"arch": "drafter", "kind": "drafter", "draft": draft,
               "source": {"draft": os.path.basename(os.path.normpath(draft_dir))}}
     w.write(out)
-    log(f"wrote {out}: {len(w.entries)} entries, a DFlash2 drafter of {draft['layers']} layer(s), block {draft['block']}, "
+    kind = "DSpine" if draft["kind"] == "dspine" else "DFlash2"
+    log(f"wrote {out}: {len(w.entries)} entries, a {kind} drafter of {draft['layers']} layer(s), block {draft['block']}, "
         f"taps {draft['taps']}, window {draft['window'] or 'none'}")
 
 
@@ -604,7 +619,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="flyx_convert", description=__doc__.splitlines()[0])
     ap.add_argument("--model", help="HuggingFace Qwen3.5, Qwen3 or Llama (MiniCPM5) directory (without it: --draft "
                                     "alone, a drafter file for --drafter-file)")
-    ap.add_argument("--draft", help="DFlash2 drafter directory, speculators' or z-lab's (optional)")
+    ap.add_argument("--draft", help="block drafter directory: DFlash2 (speculators' or z-lab's) or DSpine (optional)")
     ap.add_argument("--dv", help="DV drafter directory, as python/convert/export_dv.py writes it (optional; Llama), "
                                  "with the V-LoRA it holds")
     ap.add_argument("--lora", help="a V-LoRA alone: the directory export_dv.py --vlora writes (optional; Llama, Qwen3)")

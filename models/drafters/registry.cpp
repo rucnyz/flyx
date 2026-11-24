@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "models/drafters/dspine.h"
 #include "models/gguf.h"
 
 namespace flyx::models::drafters {
@@ -24,21 +25,28 @@ void DrafterRegistry::scan(const ModelFile& file, const TargetSpec& target, cons
   const json& hdr = file.header();
   sources_.dv = has_dv;
   if (mtp && mtp->embedded) sources_.mtp = true;
-  if (hdr.is_object() && hdr.contains("draft") && hdr["draft"].is_object()) sources_.dflash2 = true;
+  if (hdr.is_object() && hdr.contains("draft") && hdr["draft"].is_object())
+    (hdr["draft"].value("kind", "") == "dspine" ? sources_.dspine : sources_.dflash2) = true;
 
   for (int i = 0; i < file.companions(); ++i) {
     const json& h = hdr.at("companions").at(size_t(i));
     const std::string what = companion_label(i);
     if (is_dflash_companion(h)) {
-      if (sources_.dflash2) throw std::runtime_error(what + "the model has a DFlash2 drafter already");
+      if (sources_.dflash2 || sources_.dspine) throw std::runtime_error(what + "the model has a block drafter already");
       try {
         check_made_for(h, target);
       } catch (const std::exception& e) {
         throw std::runtime_error(what + e.what());
       }
-      sources_.dflash2 = true;
-      sources_.dflash2_beside = true;
-      dflash2_companion_ = i;
+      if (!GgufMeta::is_header(h) && h.at("draft").value("kind", "") == "dspine") {
+        sources_.dspine = true;
+        sources_.dspine_beside = true;
+        dspine_companion_ = i;
+      } else {
+        sources_.dflash2 = true;
+        sources_.dflash2_beside = true;
+        dflash2_companion_ = i;
+      }
     } else if (mtp && GgufMeta::is_header(h) && h.value("arch", "") == target.arch) {
       if (!target.gguf) throw std::runtime_error(what + "an MTP layer from a GGUF file goes with a GGUF model");
       if (sources_.mtp) throw std::runtime_error(what + "the model has its MTP layer already");
@@ -70,10 +78,26 @@ const DFlash2Spec& DrafterRegistry::ensure_dflash2_spec(const ModelFile& file, c
   return *dflash2_spec_;
 }
 
+const json& DrafterRegistry::dspine_config(const ModelFile& file) const {
+  const json& hdr = file.header();
+  return dspine_companion_ < 0 ? hdr.at("draft") : hdr.at("companions").at(size_t(dspine_companion_)).at("draft");
+}
+
+std::vector<int> DrafterRegistry::dspine_checked(const ModelFile& file, const TargetSpec& target) const {
+  try {
+    return dspine_taps(dspine_config(file), target);
+  } catch (const std::exception& e) {
+    if (dspine_companion_ < 0) throw;
+    throw std::runtime_error(companion_label(dspine_companion_) + e.what());
+  }
+}
+
 void DrafterRegistry::validate_selected(const ModelFile& file, const std::vector<Drafter>& selected,
                                         const TargetSpec& target) {
-  for (Drafter kind : selected)
+  for (Drafter kind : selected) {
     if (kind == Drafter::kDFlash2) (void)ensure_dflash2_spec(file, target);
+    if (kind == Drafter::kDSpine) (void)dspine_checked(file, target);
+  }
 }
 
 int DrafterRegistry::attach(Drafter kind, const ModelFile& file, Tables& T, const TargetSpec& target,
@@ -112,13 +136,26 @@ int DrafterRegistry::attach(Drafter kind, const ModelFile& file, Tables& T, cons
     if (max_drafts_out) *max_drafts_out = spec.block.block - 1;
     return dflash2_block_;
   }
+  if (kind == Drafter::kDSpine) {
+    dspine_taps_ = dspine_checked(file, target);
+    const json& d = dspine_config(file);
+    dspine_block_ = build_dspine(T, d, target, dspine_companion_);
+    context_blocks_.push_back(dspine_block_);
+    if (max_drafts_out) *max_drafts_out = d.at("block").get<int>() - 1;
+    return dspine_block_;
+  }
   throw std::runtime_error("unsupported drafter kind in DrafterRegistry::attach");
 }
 
 void DrafterRegistry::emit_taps(std::vector<flyx_node>* p, int layer_1based) const {
-  if (dflash2_block_ < 0) return;
-  for (size_t s = 0; s < dflash2_taps_.size(); ++s)
-    if (dflash2_taps_[s] == layer_1based) p->push_back({FLYX_NODE_TAP, dflash2_block_, int32_t(s), 0});
+  // The block drafter's features, whichever drafter drafts: its context stays current.
+  auto taps = [&](int block, const std::vector<int>& after) {
+    if (block < 0) return;
+    for (size_t s = 0; s < after.size(); ++s)
+      if (after[s] == layer_1based) p->push_back({FLYX_NODE_TAP, block, int32_t(s), 0});
+  };
+  taps(dflash2_block_, dflash2_taps_);
+  taps(dspine_block_, dspine_taps_);
 }
 
 void DrafterRegistry::emit_contexts(std::vector<flyx_node>* p) const {

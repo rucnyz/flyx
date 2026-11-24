@@ -28,9 +28,11 @@ std::string mismatch_msg(const TargetSpec& target) {
          std::to_string(target.vocab) + ", " + std::to_string(target.layers) + " layers)";
 }
 
-// A canonical config ("draft"): a DFlash2 drafter, made for this target where it says what it was made for.
+// A canonical config ("draft"): a block drafter (DFlash2 or DSpine, models/drafters/dspine.h), made for this target
+// where it says what it was made for.
 void check_json_target(const json& j, const TargetSpec& target) {
-  if (j.value("kind", "") != "dflash2") throw std::runtime_error(mismatch_msg(target));
+  const std::string kind = j.value("kind", "");
+  if (kind != "dflash2" && kind != "dspine") throw std::runtime_error(mismatch_msg(target));
   if (!j.contains("target") || !j["target"].is_object()) return;
   const json& t = j["target"];
   const bool layers_ok = !t.contains("layers") || t["layers"].is_null() || t["layers"].get<int>() == target.layers;
@@ -107,6 +109,7 @@ void check_made_for(const json& header, const TargetSpec& target) {
 
 DFlash2Spec parse_dflash2_json(const json& j, const TargetSpec& target, int companion) {
   check_json_target(j, target);
+  if (j.value("kind", "") != "dflash2") throw std::runtime_error("not a DFlash2 drafter config");
   DFlash2Spec spec{};
   spec.gguf = false;
   spec.companion = companion;

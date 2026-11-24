@@ -147,11 +147,27 @@ struct MtpBlock {
 // DFlash2: a block of `block` rows (the anchor, then mask tokens) through its
 // layers attending to the context K/V, then unary top-k from the head and the
 // selector walk.  Its layers wrap attention and MLP in grouped dynamic convs.
+// DSpine (flyx_dspine_block, regions/layers.cpp dspine_block) is the same block with causal attention, no convs, the
+// code bridge's write after every layer (read and write) and its walk in place of the selector's (DSpineBridge).
 struct DFlashLayer {
   Norm norm, post_norm, q_norm, k_norm;
   Lin w_qkv, w_o, w_gu, w_down;
   Lin attn_proj, mlp_proj;                    // the convs' coefficient deltas
   float *attn_base = nullptr, *mlp_base = nullptr;  // and bases, [2][taps][hidden]
+  Lin read, write;                            // DSpine's bridge: read [code, hidden], write [hidden, rank] (bf16)
+};
+// DSpine's code bridge: its codebook, its gate's three projections of a code stacked (gate | pred | prev [3 rank,
+// code]; pv: the pred | prev rows, which the walk takes of a sender's code), the gate's bias, and the last layer's
+// write transposed ([rank, hidden]: a candidate's head row through it, the walk's).  All bf16: the walk's scores are
+// differences of the rows' messages, which coarser copies would move.  code 0: not DSpine.
+struct DSpineBridge {
+  int code = 0, rank = 0, topk = 0;
+  float eps = 0.f;
+  const bf16* codebook = nullptr;             // [vocab, code]
+  Lin packed, pv;
+  float* gate_bias = nullptr;                 // [rank]
+  Lin write_t;
+  explicit operator bool() const { return code > 0; }
 };
 struct DFlashBlock {
   int hidden = 0, nh = 0, nkv = 0, hd = 0, inter = 0;
@@ -166,6 +182,7 @@ struct DFlashBlock {
   bf16 *sel_pred = nullptr, *sel_succ = nullptr;
   Norm hidden_norm, norm, k_norms;            // k_norms: every layer's, stacked
   int kv = -1;                                // context K/V, one cache per layer
+  DSpineBridge dspine;                        // a DSpine drafter's (sel_topk: its topk; no convs, no selector)
   int layers() const { return n_layers; }
   int ctx_width() const { return layers() * 2 * nkv * hd; }
 };

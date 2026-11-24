@@ -31,7 +31,10 @@ and with a sliding window of 8
 (hf_draft_window/: tiny_window.flyx with the target, golden_window.json,
 and alone, tiny_draft_window.flyx).  dv_cases.json: DV's trees, selector tables and
 canvas steps from the Python reference, for the float64 references in ops/
-(tests/ops/draft/dv_tree_test.cpp, tests/ops/canvas/canvas_test.cpp).
+(tests/ops/draft/dv_tree_test.cpp, tests/ops/canvas/canvas_test.cpp).  tiny_dspine.flyx and golden_dspine.json: the
+tiny Qwen3.5 with a tiny DSpine drafter (hf_dspine/, as tencent publishes them) in place of DFlash2's;
+tiny_dspine_window.flyx and golden_dspine_window.json the same with a sliding window of 8; tiny_draft_dspine.flyx the
+DSpine drafter alone; tiny_qwen3_dspine.flyx the tiny Qwen3 with a DSpine drafter (its tokens golden_qwen3.json's).
 
 The assets are made again only when what they are made from changed (the
 digest in OUT_DIR/.inputs): this script, the reference and the converter, the
@@ -58,7 +61,9 @@ OUTPUTS = ("tiny.flyx", "tiny_nvfp4.flyx", "tiny_qwen3.flyx", "tiny_gdn128.flyx"
            "tiny_llama_dv32.flyx", "tiny_llama_dv31.flyx", "tiny_llama_dv31_pool.flyx", "tiny_llama_dv31_wide.flyx",
            "tiny_llama_dv31_wide_pool.flyx", "golden_llama_dv.json", "tiny_llama_nvfp4.flyx", "golden_llama_nvfp4.json",
            "tiny_llama_lora.flyx", "golden_llama_lora.json", "tiny_llama_dv_lora.flyx", "golden_llama_dv_lora.json",
-           "tiny_llama_dv31_lora.flyx", "tiny_llama_nvfp4_lora.flyx", "golden_llama_nvfp4_lora.json")
+           "tiny_llama_dv31_lora.flyx", "tiny_llama_nvfp4_lora.flyx", "golden_llama_nvfp4_lora.json",
+           "tiny_dspine.flyx", "golden_dspine.json", "tiny_dspine_window.flyx", "golden_dspine_window.json",
+           "tiny_draft_dspine.flyx", "tiny_qwen3_dspine.flyx")
 
 
 def inputs_digest() -> str:
@@ -394,6 +399,63 @@ def make_draft(out_dir: str, vocab: int, mask_id: int, gen, H=64, layers=2, head
     json.dump(cfg, open(os.path.join(out_dir, "config.json"), "w", encoding="utf-8"), indent=1)
 
 
+def make_dspine(out_dir: str, vocab: int, mask_id: int, target_layers: int, gen, H=64, layers=3, heads=4, kv=2,
+                hd=32, inter=128, taps=(1, 4, 7), block=16, code=32, rank=16, topk=16, window=0):
+    """A random DSpine drafter in its authors' layout (dflash_config with the code bridge; the bridge's tensors under
+    selected_prefix_bridge., the layers' reads and writes stacked): what python/convert/flyx_convert/dspine.py
+    reads.  Its own generator, so the assets made before it stay what they were."""
+    from safetensors.torch import save_file
+    os.makedirs(out_dir, exist_ok=True)
+    r = lambda *s, scale=1.0: (torch.randn(*s, generator=gen) * scale)  # noqa: E731
+    one = lambda: torch.ones((), dtype=torch.int64)  # noqa: E731  (a tensor of its own each)
+    W = {"fc.weight": r(H, len(taps) * H, scale=1 / math.sqrt(len(taps) * H)),
+         "hidden_norm.weight": 1 + 0.2 * r(H), "norm.weight": 1 + 0.2 * r(H),
+         "draft_block_causal_version": one(), "last_write_refine_version": one()}
+    b = "selected_prefix_bridge."
+    W.update({b + "codebook": r(vocab, code), b + "read_weight": r(code, H, scale=H ** -0.5),
+              b + "early_read_weights": r(layers - 1, code, H, scale=H ** -0.5),
+              # messages of the size of the rows they join: they move drafts, as a trained bridge's do
+              b + "feature_write_weights": r(layers, H, rank, scale=1.5 * rank ** -0.5),
+              b + "gate.weight": r(rank, code, scale=code ** -0.5), b + "gate.bias": 0.5 * r(rank),
+              b + "predecessor_gate.weight": r(rank, code, scale=code ** -0.5),
+              b + "prev.weight": r(rank, code, scale=code ** -0.5), b + "out.weight": torch.zeros(code, rank),
+              b + "independent_write_version": one(), b + "terminal_disabled_version": one()})
+    for j in range(layers):
+        p = f"layers.{j}."
+        W.update({
+            p + "input_layernorm.weight": 1 + 0.2 * r(H), p + "post_attention_layernorm.weight": 1 + 0.2 * r(H),
+            p + "self_attn.q_proj.weight": r(heads * hd, H, scale=H ** -0.5),
+            p + "self_attn.k_proj.weight": r(kv * hd, H, scale=H ** -0.5),
+            p + "self_attn.v_proj.weight": r(kv * hd, H, scale=H ** -0.5),
+            p + "self_attn.o_proj.weight": r(H, heads * hd, scale=(heads * hd) ** -0.5),
+            p + "self_attn.q_norm.weight": 1 + 0.2 * r(hd), p + "self_attn.k_norm.weight": 1 + 0.2 * r(hd),
+            p + "mlp.gate_proj.weight": r(inter, H, scale=H ** -0.5),
+            p + "mlp.up_proj.weight": r(inter, H, scale=H ** -0.5),
+            p + "mlp.down_proj.weight": r(H, inter, scale=inter ** -0.5)})
+    save_file({k: (v if v.dtype == torch.int64 else v.to(torch.bfloat16)).contiguous() for k, v in W.items()},
+              os.path.join(out_dir, "model.safetensors"))
+    cfg = {"architectures": ["DSpineDraftModel"], "model_type": "qwen3", "attention_bias": False, "block_size": block,
+           "hidden_act": "silu", "hidden_size": H, "intermediate_size": inter, "num_hidden_layers": layers,
+           "num_attention_heads": heads, "num_key_value_heads": kv, "head_dim": hd, "rms_norm_eps": 1e-6,
+           "vocab_size": vocab, "draft_vocab_size": vocab, "num_target_layers": target_layers,
+           "max_position_embeddings": 4096, "tie_word_embeddings": False,
+           "rope_parameters": {"rope_type": "default", "rope_theta": 1000000.0}, "rope_theta": 1000000.0,
+           "layer_types": ["sliding_attention" if window else "full_attention"] * layers,
+           "use_sliding_window": bool(window), "sliding_window": window or None, "max_window_layers": layers,
+           "dflash_config": {
+               "draft_block_causal": True, "mask_token_id": mask_id, "target_layer_ids": [t - 1 for t in taps],
+               "selected_prefix_code_bridge": {"code_size": code, "eps": 1e-6, "kappa": 10.0, "rank": rank},
+               "selected_prefix_decode_mode": "serial", "selected_prefix_feature_gt_training": True,
+               "selected_prefix_feature_layers": list(range(1, layers + 1)),
+               "selected_prefix_feature_write_mode": "independent", "selected_prefix_feature_writes": True,
+               "selected_prefix_last_write_refine": {"head_topk": topk, "kind": "exact_sender", "version": 1,
+                                                     "weight": 1.0},
+               "selected_prefix_terminal": False}}
+    if window:  # as the 27B's drafter says it (the second pass over the last write; the same width)
+        cfg["code_bridge_second_pass"] = {"first_exact": layers - 1, "head_topk": topk, "mode": "serial_table"}
+    json.dump(cfg, open(os.path.join(out_dir, "config.json"), "w", encoding="utf-8"), indent=1)
+
+
 def zlab_drafter(src: str, dst: str, target_layers: int, window: int = 0, block: int = 0):
     """The drafter in src (speculators' layout) as z-lab publishes DFlash2 drafters: the same tensors, its settings
     in dflash_config, target_layer_ids the layers whose outputs it reads (speculators' indices - 1), with a
@@ -523,6 +585,26 @@ def main(out):
     write_dv_cases(os.path.join(out, "dv_cases.json"))
     make_llama_dv(out, ldir)
     nlora = make_llama_lora(out, ldir, prompts + more)
+    # The tiny Qwen3.5 with a DSpine drafter in place of DFlash2's (its MTP layer kept), and with a sliding window of
+    # 8; the drafter alone as a drafter file.  Its own generator: the files above stay what they were.
+    sgen = torch.Generator().manual_seed(4321)
+    sdir, swdir = os.path.join(out, "hf_dspine"), os.path.join(out, "hf_dspine_window")
+    mask = tok.token_to_id("<|mask|>")
+    make_dspine(sdir, vocab, mask, layers, sgen)
+    spath = os.path.join(out, "tiny_dspine.flyx")
+    convert(tdir, spath, sdir, log=lambda *_: None)
+    write_golden(spath, os.path.join(out, "golden_dspine.json"), prompts + more, vocab, keep=4)
+    make_dspine(swdir, vocab, mask, layers, sgen, window=8)
+    swpath = os.path.join(out, "tiny_dspine_window.flyx")
+    convert(tdir, swpath, swdir, log=lambda *_: None)
+    write_golden(swpath, os.path.join(out, "golden_dspine_window.json"), prompts + more, vocab, keep=4)
+    convert_draft(sdir, os.path.join(out, "tiny_draft_dspine.flyx"), log=lambda *_: None)
+    same_drafter(spath, os.path.join(out, "tiny_draft_dspine.flyx"))
+    # The tiny Qwen3 with a DSpine drafter of its own (taps after its layers 1, 2 and 3 of 4): held to transformers'
+    # tokens (golden_qwen3.json) with it drafting, as a second architecture's block drafter.
+    q3s = os.path.join(out, "hf_qwen3_dspine")
+    make_dspine(q3s, vocab, mask, 4, sgen, taps=(1, 2, 3))
+    convert(q3dir, os.path.join(out, "tiny_qwen3_dspine.flyx"), q3s, log=lambda *_: None)
     cases = {name: json.load(open(os.path.join(out, golden), encoding="utf-8"))["cases"]
              for name, golden in (("", "golden_llama.json"), ("tiny_llama_dv_lora.flyx", "golden_llama_dv_lora.json"),
                                   ("tiny_llama_dv31_lora.flyx", "golden_llama_dv_lora.json"))}
@@ -557,7 +639,8 @@ def main(out):
           f"tiny_llama_nvfp4.flyx, golden_llama_nvfp4.json, tiny_llama_lora.flyx, golden_llama_lora.json and "
           f"golden_llama_dv_lora.json ({nlora[0]} and {nlora[1]} prompts), tiny_llama_dv_lora.flyx, "
           f"tiny_llama_dv31_lora.flyx, "
-          f"tiny_llama_nvfp4_lora.flyx, golden_llama_nvfp4_lora.json")
+          f"tiny_llama_nvfp4_lora.flyx, golden_llama_nvfp4_lora.json, tiny_dspine.flyx, golden_dspine.json, "
+          f"tiny_dspine_window.flyx, golden_dspine_window.json, tiny_draft_dspine.flyx, tiny_qwen3_dspine.flyx")
 
 
 def make_llama_dv(out: str, ldir: str):
@@ -961,7 +1044,7 @@ PENALTY = (1.5, 0.25)  # presence, frequency: the golden cases with penalties
 
 def write_golden(path, out_json, prompts, vocab, min_margin=0.0, keep=None):
     target, draft, mtp, header, _ = load(path, with_mtp=True)
-    golden = {"eos": header["generation"]["eos_ids"], "cases": []}
+    golden = {"eos": header["generation"]["eos_ids"], "block_drafter": header["draft"]["kind"], "cases": []}
     for pr in prompts:
         if keep is not None and len(golden["cases"]) >= keep:
             break
