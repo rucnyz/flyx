@@ -66,6 +66,7 @@ int main(int argc, char** argv) {
   same(dir, model, "hf_draft_window", "tiny_draft_window.flyx");
   same(dir, model, "hf_draft", "tiny_draft.flyx", false);  // speculators' layout: the same drafter
   same(dir, model, "hf_dspine", "tiny_draft_dspine.flyx");   // DSpine, its stacked bridge tensors cut per layer
+  same(dir, model, "hf_dspine1", "tiny_draft_dspine1.flyx");  // one layer: no early reads ([0, code, hidden])
   {
     flyx::ModelFile f;
     std::string err;

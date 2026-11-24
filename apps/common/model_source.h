@@ -33,7 +33,7 @@ struct Fetched {
   std::string name;                   // the model's name for the API: its file's, without the extension
   std::vector<std::string> notes;     // for the log: a drafter published for this model, the MTP file taken
   std::vector<DrafterSource> drafter_sources;  // what the model drafts with: its own MTP layer, the files above
-  std::vector<DrafterSource> suggested;        // DFlash2 drafters published for it and not named (from: the Hub name)
+  std::vector<DrafterSource> suggested;        // block drafters published for it, none given (from: the Hub name)
 };
 
 // Fetches what is missing. want_mtp: take the repository's MTP file for a GGUF without the layer.

@@ -172,7 +172,7 @@ export default {
     "here and two folders down": "本文件夹及向下两级", "No .gguf or .flyx model files here.": "这里没有 .gguf 或 .flyx 模型文件。",
     "Open a folder to see its model files.": "打开一个文件夹，查看其中的模型文件。", "Choose one of these to load.": "从上面选一个来加载。",
     "Drafts with the drafter set for the model served.": "会沿用为当前模型设置的 drafter。", "Use this model's default": "改用这个模型的默认 drafter",
-    "A DFlash2 drafter is published for this model.": "这个模型有对应的 DFlash2 drafter。", "It often adds speed on top of MTP:": "通常能在 MTP 基础上再提速：",
+    "A DFlash2 drafter is published for this model.": "这个模型有对应的 DFlash2 drafter。", "A DSpine drafter is published for this model.": "这个模型有对应的 DSpine drafter。", "It often adds speed on top of MTP:": "通常能在 MTP 基础上再提速：",
     "Looked in the Hugging Face cache": "已扫描 Hugging Face 缓存", "(the default)": "（默认位置）", "last reply": "上一条回复", "drafter": "drafter",
     "Cancel": "取消", "Delete": "删除", "Switch": "切换", "Reload": "重新加载", "Delete from the Hugging Face cache": "从 Hugging Face 缓存中删除",
     "It can be downloaded again by loading the same name.": "以后加载同样的名字会重新下载。",

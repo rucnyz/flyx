@@ -293,8 +293,11 @@ bool fetch_model(const std::string& model, const std::vector<std::string>& draft
     out->drafter_sources.push_back({"mtp", repo.id + "/" + mtp->path, bytes_on_disk(paths[0])});
     out->notes.push_back("the MTP layer from " + repo.id + "/" + mtp->path + " (the model's file has none)");
   }
+  // A model takes one block drafter: beside one given, none of either kind is suggested.
+  bool block_given = false;
+  for (const DrafterSource& s : out->drafter_sources) block_given = block_given || s.kind != "mtp";
   for (const std::string& k : known_drafters(repo.base_models)) {
-    bool given = false;
+    bool given = block_given;
     for (const std::string& d : drafters) given = given || d.rfind(k, 0) == 0;
     if (given) continue;
     const std::string kind = k.find("DSpine") != std::string::npos ? "dspine" : "dflash2";

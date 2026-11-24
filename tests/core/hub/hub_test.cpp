@@ -354,6 +354,32 @@ void cache_snapshots(const fs::path& tmp) {
   }
 }
 
+// ---- a drafter's kind from a cached config ----------------------------------------------------------------------
+// tencent's DSpine drafters were first published as DFlashDraftModel with a code bridge in their dflash_config: read
+// as DSpine.  DFlash's own DFlashDraftModel (no bridge) is no drafter flyx reads.
+void cached_drafter_kinds(const fs::path& tmp) {
+  const std::string commit = "3333333333333333333333333333333333333333";
+  const std::pair<const char*, const char*> cases[] = {
+      {"models--acme--old-DSpine",
+       R"({"architectures": ["DFlashDraftModel"], "dflash_config": {"selected_prefix_code_bridge": {"code_dim": 8}}})"},
+      {"models--acme--new-DSpine", R"({"architectures": ["DSpineDraftModel"], "dflash_config": {}})"},
+      {"models--acme--DFlash", R"({"architectures": ["DFlashDraftModel"], "dflash_config": {"mask_token_id": 1}})"},
+  };
+  for (const auto& [dir, config] : cases) {
+    put(tmp / dir, commit, "config.json", config);
+    fs::create_directories(tmp / dir / "refs");
+    std::ofstream(tmp / dir / "refs" / "main", std::ios::binary) << commit;
+  }
+  set_env("HF_HUB_CACHE", from_path(tmp));
+  flyx::hub::Repo old_r, new_r, dflash;
+  check(flyx::hub::in_cache("acme/old-DSpine", "main", &old_r) && flyx::hub::drafter_kind(old_r) == "dspine",
+        "a DSpine drafter named DFlashDraftModel, its code bridge in its config: DSpine");
+  check(flyx::hub::in_cache("acme/new-DSpine", "main", &new_r) && flyx::hub::drafter_kind(new_r) == "dspine",
+        "a DSpineDraftModel: DSpine");
+  check(flyx::hub::in_cache("acme/DFlash", "main", &dflash) && !flyx::hub::is_drafter(dflash),
+        "DFlash's DFlashDraftModel, no code bridge: no drafter flyx reads");
+}
+
 // ---- a fake Hub ------------------------------------------------------------------------------------------------
 struct FakeHub {
   const std::string commit = "0123456789abcdef0123456789abcdef01234567";
@@ -612,6 +638,7 @@ int main(int argc, char** argv) {
   choices();
   const TestDirectory tmp;
   cache_snapshots(tmp.path / "snapshots");
+  cached_drafter_kinds(tmp.path / "kinds");
 #if !defined(_WIN32)
   void* curl = dlopen("libcurl.so.4", RTLD_NOW);
   if (!curl) curl = dlopen("libcurl.4.dylib", RTLD_NOW);

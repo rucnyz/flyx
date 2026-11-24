@@ -144,8 +144,9 @@ function Serving({ tm, again, retry, browse }) {
     </div>`;
 }
 
-// A drafter given as a GGUF is an MTP layer; anything else a DFlash2 drafter.
-const kindOf = (d) => /\.gguf$/i.test(d) ? "mtp" : "dflash2";
+// A drafter given as a GGUF is an MTP layer; a block drafter's kind by its name as published (org/X-DFlash2,
+// org/X-DSpine-b16), else the engine's choice from what the file holds ("": auto).
+const kindOf = (d) => /\.gguf$/i.test(d) ? "mtp" : /dspine/i.test(d) ? "dspine" : /dflash/i.test(d) ? "dflash2" : "";
 const normVisionDev = (v) => (v === "host" || v === "cpu") ? "host" : v === "gpu" ? "gpu" : v === "auto" ? "auto" : "disk";
 const normVisionQuant = (v) => (v === "exact" || v === "bf16") ? "exact" : (v === "nvfp4" || v === "fp4") ? "nvfp4" : "q8";
 const drafterLabel = (k) => ({ mtp: "MTP", dflash2: "DFlash2", dspine: "DSpine" })[k] || k;
@@ -846,7 +847,7 @@ export function ModelPage({ active, libraryAsked, currentAsked }) {
           ${model.id ? html`<button class="btn sm" onClick=${() => draftWith(repoSel)}>${t("Draft with it")}</button>` : ""}</div>` : ""}
         ${j && !j.drafter && !rows.length ? html`<p class="lead">${t("No GGUF files in " + repoSel + ".")}</p>` : ""}
         ${j && (j.known_drafters || []).length ? html`
-          <div class="banner hint" id="hf-drafters"><div class="grow2">${t("A DFlash2 drafter is published for this model.")} ${t("It often adds speed on top of MTP:")}
+          <div class="banner hint" id="hf-drafters"><div class="grow2">${t(/dspine/i.test(j.known_drafters[0]) ? "A DSpine drafter is published for this model." : "A DFlash2 drafter is published for this model.")} ${t("It often adds speed on top of MTP:")}
             ${" "}<code>${j.known_drafters[0]}</code></div>
             ${model.id ? html`<button class="btn sm" onClick=${() => draftWith(j.known_drafters[0])}>${t("Add to settings")}</button>` : ""}</div>` : ""}
       </div>

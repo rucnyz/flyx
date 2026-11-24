@@ -33,7 +33,8 @@ canvas steps from the Python reference, for the float64 references in ops/
 (tests/ops/draft/dv_tree_test.cpp, tests/ops/canvas/canvas_test.cpp).  tiny_dspine.flyx and golden_dspine.json: the
 tiny Qwen3.5 with a tiny DSpine drafter (hf_dspine/, as tencent publishes them) in place of DFlash2's;
 tiny_dspine_window.flyx and golden_dspine_window.json the same with a sliding window of 8; tiny_draft_dspine.flyx the
-DSpine drafter alone; tiny_qwen3_dspine.flyx the tiny Qwen3 with a DSpine drafter (its tokens golden_qwen3.json's).
+DSpine drafter alone; tiny_qwen3_dspine.flyx the tiny Qwen3 with a DSpine drafter (its tokens golden_qwen3.json's);
+tiny_dspine1.flyx, golden_dspine1.json and tiny_draft_dspine1.flyx (hf_dspine1/) with a DSpine drafter of one layer.
 
 The assets are made again only when what they are made from changed (the
 digest in OUT_DIR/.inputs): this script, the reference and the converter, the
@@ -61,7 +62,8 @@ OUTPUTS = ("tiny.flyx", "tiny_nvfp4.flyx", "tiny_qwen3.flyx", "tiny_gdn128.flyx"
            "tiny_llama_lora.flyx", "golden_llama_lora.json", "tiny_llama_dv_lora.flyx", "golden_llama_dv_lora.json",
            "tiny_llama_dv31_lora.flyx", "tiny_llama_nvfp4_lora.flyx", "golden_llama_nvfp4_lora.json",
            "tiny_dspine.flyx", "golden_dspine.json", "tiny_dspine_window.flyx", "golden_dspine_window.json",
-           "tiny_draft_dspine.flyx", "tiny_qwen3_dspine.flyx")
+           "tiny_draft_dspine.flyx", "tiny_qwen3_dspine.flyx", "tiny_dspine1.flyx", "golden_dspine1.json",
+           "tiny_draft_dspine1.flyx")
 
 
 def inputs_digest() -> str:
@@ -597,6 +599,13 @@ def main(out):
     q3s = os.path.join(out, "hf_qwen3_dspine")
     make_dspine(q3s, vocab, mask, 4, sgen, taps=(1, 2, 3))
     convert(q3dir, os.path.join(out, "tiny_qwen3_dspine.flyx"), q3s, log=lambda *_: None)
+    # A DSpine drafter of one layer: no stacked early reads (early_read_weights [0, code, hidden]), its one cache
+    # binary16 beside fp8 target caches.
+    s1dir, s1path = os.path.join(out, "hf_dspine1"), os.path.join(out, "tiny_dspine1.flyx")
+    make_dspine(s1dir, vocab, mask, layers, sgen, layers=1)
+    convert(tdir, s1path, s1dir, log=lambda *_: None)
+    write_golden(s1path, os.path.join(out, "golden_dspine1.json"), prompts + more, vocab, keep=4)
+    convert_draft(s1dir, os.path.join(out, "tiny_draft_dspine1.flyx"), log=lambda *_: None)
     cases = {name: json.load(open(os.path.join(out, golden), encoding="utf-8"))["cases"]
              for name, golden in (("", "golden_llama.json"), ("tiny_llama_dv_lora.flyx", "golden_llama_dv_lora.json"),
                                   ("tiny_llama_dv31_lora.flyx", "golden_llama_dv_lora.json"))}
@@ -631,7 +640,8 @@ def main(out):
           f"golden_llama_dv_lora.json ({nlora[0]} and {nlora[1]} prompts), tiny_llama_dv_lora.flyx, "
           f"tiny_llama_dv31_lora.flyx, "
           f"tiny_llama_nvfp4_lora.flyx, golden_llama_nvfp4_lora.json, tiny_dspine.flyx, golden_dspine.json, "
-          f"tiny_dspine_window.flyx, golden_dspine_window.json, tiny_draft_dspine.flyx, tiny_qwen3_dspine.flyx")
+          f"tiny_dspine_window.flyx, golden_dspine_window.json, tiny_draft_dspine.flyx, tiny_qwen3_dspine.flyx, "
+          f"tiny_dspine1.flyx, golden_dspine1.json, tiny_draft_dspine1.flyx")
 
 
 def make_llama_dv(out: str, ldir: str):
