@@ -27,6 +27,11 @@ thinking off):
 |---|---:|---:|---|---|
 | `chat_short.jsonl` | 2,197 | 24 | `abd29de8b71aa54b54b3f3a6f611d768` | Short chat requests unlike GSM8K (code, explanations, stories, poems, a translation, an email, lists): where a drafter trained on math answers drafts little |
 
+`eval_sets.py` writes the sets [benchmarks](../../docs/benchmarks.md)' drafter tables (DSpine, DFlash2, MTP) ran,
+from public evaluation sets downloaded with `hf download`: the first 30 of GSM8K, MATH-500, HumanEval, MBPP and
+MT-Bench's first turns, as questions (`python -I bench/prompts/eval_sets.py HF_DIR OUT`), and with `--think` the
+first four as token ids with thinking on.
+
 `dv_sets.py` writes the sets DV's per-round choice was tuned on from GSM8K's test split (`gsm8k_test.jsonl`, not
 kept here: the public `openai/gsm8k`, config `main`, split `test`, one `{"question", "answer"}` object a line in the
 dataset's order, `json.dumps(..., ensure_ascii=False)`, lines ending in CRLF as bifill-dv's `data/gsm8k_test.jsonl`,
