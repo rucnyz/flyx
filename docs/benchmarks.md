@@ -212,6 +212,9 @@ python -I bench/prompts/eval_sets.py hf/ sets/
 flyx bench q27-dspine.flyx --prompts sets/gsm8k.jsonl -n 1024 --json gsm8k.json --drafter dspine   # chosen widths
 flyx bench q27-dspine.flyx --prompts sets/gsm8k.jsonl -n 1024 --json gsm8k.json --drafter dspine --width 15 --no-lookup
 # likewise --no-spec, --drafter mtp, --drafter dflash2 [--width 7 --no-lookup] on the DFlash2 file
+# thinking on: the first 20 of GSM8K as token ids, the template's opener after the assistant's role
+python -I bench/prompts/eval_sets.py hf/ think/ --n 20 --think Qwen3.8-27B-QUASAR-NVFP4/tokenizer.json --opener $'<think>\n'
+flyx bench q27-dspine.flyx --prompts think/gsm8k_think.jsonl -n 1024 --json think.json --drafter dspine --width 15 --no-lookup
 ```
 
 Decode `tok/s` (tokens a round). Every drafted answer is plain decoding's, token for token (all 174 prompts, every
@@ -239,8 +242,8 @@ configuration).
   / 18.01 ms for 3 / 7 / 15 drafts against 14.14 / 14.90 / 17.73), and DSpine's NVFP4 layer copies beside the NVFP4
   target accept as its exact weights do (GSM8K at 15 drafts: 7.51 against 7.49 tokens a round).
 * DSpine at its block of 16 accepts more than DFlash2 at its block of 8, as its authors report (GSM8K: 7.51 against
-  6.20 tokens a round; with thinking on, 20 prompts: 6.93 against 5.60, 378.5 against 376.6 tok/s), and on Qwen3-8B as
-  they report (GSM8K at 15 drafts: 10.03; theirs 10.55).  Its first drafts are accepted less often than DFlash2's on
+  6.20 tokens a round; with thinking on, `think/gsm8k_think.jsonl` above: 6.93 against 5.60, 378.5 against
+  376.6 tok/s), and on Qwen3-8B as they report (GSM8K at 15 drafts: 10.03; theirs 10.55).  Its first drafts are accepted less often than DFlash2's on
   the 27B (the first: 0.912 against 0.948; seven deep: 0.419 against 0.567), and flyx's DFlash2 also drafts 15 from
   a wider block (GSM8K, `--width 15 --no-lookup`: 8.26 tokens a round, 455.2 tok/s): the faster of the two depends on
   the text, DSpine on code (HumanEval, MBPP), DFlash2 on math and chat.

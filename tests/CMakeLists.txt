@@ -386,6 +386,7 @@ flyx_add_golden_test(golden_cpu_ref_window ARGS cpu_ref window)
 # A DSpine drafter in place of DFlash2's (the whole battery: its rounds, oracle runs, rollback, sampling, ...), and one
 # whose layers attend a causal sliding window of 8 (the 27B's drafter's), shorter than its block.
 flyx_add_golden_test(golden_cpu_ref_dspine ARGS cpu_ref dspine)
+flyx_add_golden_test(golden_cpu_ref_dspine1 ARGS cpu_ref dspine1)  # a drafter of one layer
 flyx_add_golden_test(golden_cpu_ref_dspine_window ARGS cpu_ref dspine_window)
 # The tiny Qwen3 with a DSpine drafter (taps and context in a second architecture's programs): transformers' tokens.
 flyx_add_golden_test(golden_cpu_ref_qwen3_dspine ARGS cpu_ref qwen3 ${ASSETS}/tiny_qwen3_dspine.flyx)
@@ -498,6 +499,7 @@ if(TARGET flyx-cuda)
   flyx_add_golden_test(golden_cuda_dspine ARGS cuda dspine)
   flyx_add_golden_test(golden_cuda_dspine_unfused ARGS cuda dspine ENV FLYX_BACKEND_OPTIONS=fusion=0)
   flyx_add_golden_test(golden_cuda_dspine_window ARGS cuda dspine_window)
+  flyx_add_golden_test(golden_cuda_dspine1 ARGS cuda dspine1)  # one layer: its cache binary16 beside fp8 ones
   flyx_add_golden_test(golden_cuda_qwen3_dspine ARGS cuda qwen3 ${ASSETS}/tiny_qwen3_dspine.flyx)
   # decode and verification attention on tensor cores for every row (by default only past rows_attention_from keys)
   flyx_add_golden_test(golden_cuda_rows_mma ARGS cuda nvfp4 ENV FLYX_BACKEND_OPTIONS=rows_attention_from=0)

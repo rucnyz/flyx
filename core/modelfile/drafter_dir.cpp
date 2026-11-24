@@ -95,7 +95,8 @@ json dspine_config(const json& sc) {
   dspine_require(widths[0] >= 2 && widths[0] <= 16, "refinement width (2..16)");
   const json bridge = dc.value("selected_prefix_code_bridge", json());
   dspine_require(bridge.is_object(), "no selected_prefix_code_bridge");
-  const json rp = sc.value("rope_parameters", json::object());
+  json rp = sc.value("rope_parameters", json::object());  // null: none, as python's `or {}`
+  if (rp.is_null()) rp = json::object();
   dspine_require((rp.is_object() && rp.value("rope_type", rp.value("type", "default")) == "default") &&
                      sc.value("rope_scaling", json()).is_null(),
                  "rope scaling (default rotary only)");
@@ -388,13 +389,17 @@ bool read_drafter_dir(const std::string& dir, std::vector<std::unique_ptr<os::Ma
           seen.push_back(c);
         };
         if (version) {
+          // one integer of any width holding 1 (little-endian: its low bytes first)
+          const uint64_t width = v.dtype == FLYX_DT_I64 ? 8 : v.dtype == FLYX_DT_I32 ? 4 : v.dtype == FLYX_DT_U8 ? 1 : 0;
           int64_t one = 0;
-          if (v.dtype != FLYX_DT_I64 || v.nbytes != 8 || (std::memcpy(&one, v.data, 8), one != 1))
+          if (!width || v.nbytes != width || (std::memcpy(&one, v.data, size_t(width)), one != 1))
             return *err = dir + ": DSpine drafter: " + inner + " is not 1", false;
         } else if (terminal) {
+          // a sign bit alone (an element's top byte 0x80, the rest 0) is a zero too
           const auto* b = static_cast<const uint8_t*>(v.data);
-          for (uint64_t i = 0; i < v.nbytes; ++i)  // bf16 or binary16: a sign bit alone is a zero too
-            if (b[i] && !(v.dtype != FLYX_DT_F32 && i % 2 == 1 && b[i] == 0x80))
+          const uint64_t es = v.dtype == FLYX_DT_F64 ? 8 : v.dtype == FLYX_DT_F32 ? 4 : 2;
+          for (uint64_t i = 0; i < v.nbytes; ++i)
+            if (b[i] && !(i % es == es - 1 && b[i] == 0x80))
               return *err = dir + ": DSpine drafter: a terminal projection that is not zero", false;
         } else if (stacked) {
           // [n, ...] -> n views of one layer each; the last layer's read stands alone (read_weight)
@@ -403,6 +408,7 @@ bool read_drafter_dir(const std::string& dir, std::vector<std::unique_ptr<os::Ma
           const int64_t n = last ? 1 : v.shape[0];
           if (!last && (v.ndim != 3 || n != (read ? layers - 1 : layers)))
             return *err = dir + ": DSpine drafter: " + inner + " is not one per layer", false;
+          if (n == 0) continue;  // a drafter of one layer: no layer before the last reads
           flyx_tensor_view part = v;
           if (!last) {
             part.ndim = 2;
