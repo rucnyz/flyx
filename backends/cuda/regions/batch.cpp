@@ -438,7 +438,8 @@ void run_batch(const BatchPass& bp) {
         continue;
       }
       if (const auto* d = std::get_if<DFlashBlock>(ps.p->block[0]);
-          d && df.dx && d->block > 0 && d->block * 2 <= FLYX_MAX_ROWS && (!dflash_blk || dflash_blk == d)) {
+          d && !d->dspine && df.dx && d->block > 0 && d->block * 2 <= FLYX_MAX_ROWS &&
+          (!dflash_blk || dflash_blk == d)) {
         dflash_blk = d;
         dflash_members.push_back(idx);
         continue;

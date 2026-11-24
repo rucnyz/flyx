@@ -145,6 +145,7 @@ int main() {
   test_select();
   test_stop_decide();
   test_dv();
+  test_dspine();
   test_sample();
   test_penalize();
   test_wide_rows_choice();

@@ -1,7 +1,7 @@
 // Copyright 2026 The flyx Authors. SPDX-License-Identifier: Apache-2.0
 // Qwen3.5 from its model file: the layer math as block flags (attention with
 // an output gate, (1 + w) norms and partial rotary; GDN with a plain-weight
-// output norm; the DFlash2 drafter with plain norms), and the two ways a file
+// output norm; the DFlash2 and DSpine drafters with plain norms), and the two ways a file
 // stores the same model:
 //   .flyx  the config in the header, tensors under the names
 //             python/convert writes ("target.L3.attn.q"), laid out for the
@@ -18,6 +18,7 @@
 #include <cmath>
 #include <stdexcept>
 
+#include "models/dspine.h"
 #include "models/gguf.h"
 #include "models/vision/preprocess.h"
 
@@ -57,10 +58,10 @@ struct Config {
   bool mrope_interleaved = false;
   int trained_ctx = 0;  // the context the model was made for (0: the file does not say)
   bool gguf = false;  // the file's names and layout (above)
-  bool mtp = false, dflash2 = false;  // the drafters the model has
+  bool mtp = false, dflash2 = false, dspine = false;  // the drafters the model has (one block drafter at most)
   int mtp_companion = -1;    // the companion (ModelFile::add) holding the MTP layer, -1: the model file
-  int draft_companion = -1;  // the companion holding the DFlash2 drafter, -1: the model file
-  json draft;                // the DFlash2 drafter's config
+  int draft_companion = -1;  // the companion holding the block drafter (DFlash2 or DSpine), -1: the model file
+  json draft;                // the block drafter's config
   VisionCfg vision;          // optional Qwen3.5/3.8 vision encoder (from mmproj companion or .flyx)
 };
 
@@ -227,8 +228,8 @@ void read_gguf_mmproj(const json& h, int companion_idx, const Config& f, VisionC
 //   a clip/mmproj GGUF holding the Qwen3.5/3.8 vision encoder (mmproj-BF16.gguf);
 //   a GGUF of this architecture and width whose one MTP layer is the block after the model's (unsloth ships the
 //     27B's so), with a GGUF model: its other tensors (its own embedding and head) are not read, the model's are;
-//   a drafter file (python/convert --draft alone) holding a DFlash2 drafter made for a target of this width and
-//     vocabulary (and layer count, when it names one), with a model of either format.
+//   a drafter file (python/convert --draft alone) holding a block drafter (DFlash2 or DSpine) made for a target of
+//     this width and vocabulary (and layer count, when it names one), with a model of either format.
 void take_companions(const ModelFile& file, Config* f, bool load_vision) {
   for (int i = 0; i < file.companions(); ++i) {
     const json& h = file.header().at("companions").at(size_t(i));
@@ -248,20 +249,22 @@ void take_companions(const ModelFile& file, Config* f, bool load_vision) {
       f->mtp = true;
       f->mtp_companion = i;
     } else if (h.value("kind", "") == "drafter" && h.contains("draft") && h["draft"].is_object()) {
-      if (f->dflash2) throw std::runtime_error(what + "the model has a DFlash2 drafter already");
+      if (f->dflash2 || f->dspine) throw std::runtime_error(what + "the model has a block drafter already");
       const json& d = h["draft"];
       const json t = d.value("target", json::object());
-      if (d.value("kind", "") != "dflash2" || t.value("hidden", f->hidden) != f->hidden ||
+      const std::string kind = d.value("kind", "");
+      if ((kind != "dflash2" && kind != "dspine") || t.value("hidden", f->hidden) != f->hidden ||
           t.value("vocab", f->vocab) != f->vocab ||
           (t.contains("layers") && !t["layers"].is_null() && t["layers"].get<int>() != f->layers))
         throw std::runtime_error(what + "a drafter made for another model (this one: width " +
                                  std::to_string(f->hidden) + ", vocabulary " + std::to_string(f->vocab) + ", " +
                                  std::to_string(f->layers) + " layers)");
-      f->dflash2 = true;
+      (kind == "dspine" ? f->dspine : f->dflash2) = true;
       f->draft_companion = i;
       f->draft = d;
     } else {
-      throw std::runtime_error(what + "holds no drafter or vision encoder this model takes");
+      throw std::runtime_error(what + "holds no drafter or vision encoder this model takes (a GGUF MTP "
+                                      "layer, a DFlash2 or DSpine drafter file, a vision projector)");
     }
   }
 }
@@ -270,8 +273,10 @@ Config read_config(const json& h) {
   const json& c = h.at("config");
   Config f{};
   f.mtp = h.contains("mtp") && !h["mtp"].is_null();
-  f.dflash2 = h.contains("draft") && !h["draft"].is_null();
-  if (f.dflash2) f.draft = h["draft"];
+  if (h.contains("draft") && !h["draft"].is_null()) {
+    f.draft = h["draft"];
+    (f.draft.value("kind", "dflash2") == "dspine" ? f.dspine : f.dflash2) = true;
+  }
   f.hidden = c.at("hidden");
   f.layers = c.at("layers");
   f.vocab = c.at("vocab");
@@ -324,13 +329,14 @@ class Qwen35 final : public Model {
   int mlp(const std::string& p, const Config& c);
   int dflash2(const json& d, const Config& c);
   void build_vision(const ModelFile& file, const Config& c);
+  int describe_dspine(const json& d, const Config& c);
   void add_layers(std::vector<flyx_node>* p) const;
   void add_contexts(std::vector<flyx_node>* p) const;  // every drafter takes the pass's rows
 
   // The file's name for a tensor, and the offset of its (offset + w) norms.
   std::string n(const std::string& name) const { return gguf_ ? gguf_name(name, layers_, mtp_companion_) : name; }
   Tables::NameFn name_fn() const { return [this](const std::string& name) { return n(name); }; }
-  // A DFlash2 drafter's tensor ("draft.fc"): in the model file, or in its drafter file.
+  // A block drafter's tensor ("draft.fc"): in the model file, or in its drafter file.
   std::string dn(const std::string& name) const {
     return draft_companion_ >= 0 ? ModelFile::companion_name(draft_companion_, name) : name;
   }
@@ -339,9 +345,9 @@ class Qwen35 final : public Model {
   bool gguf_ = false;
   int mtp_companion_ = -1, draft_companion_ = -1;
   int layers_ = 0;
-  int embed_ = -1, head_ = -1, dflash2_block_ = -1;
+  int embed_ = -1, head_ = -1, block_drafter_ = -1;  // the DFlash2 or DSpine block
   std::vector<int> mixer_, mlp_;
-  std::vector<int> taps_;  // DFlash2: features from the residual stream after taps_[s] layers
+  std::vector<int> taps_;  // the block drafter's features: the residual stream after taps_[s] layers
 };
 
 // "<p>attn.*" (p = "target.L3." or "mtp.L0."): q carries the output gate.
@@ -633,6 +639,12 @@ void Qwen35::build_vision(const ModelFile& file, const Config& c) {
   set_vision(std::make_unique<vision::Qwen35VisionAdapter>(vp), std::move(vnodes));
 }
 
+int Qwen35::describe_dspine(const json& j, const Config& c) {
+  const dspine::Target t{c.hidden, c.vocab, c.layers, embed_, head_};
+  taps_ = dspine::taps(j, t);
+  return dspine::describe(tables_, j, t, [this](const std::string& name) { return dn(name); });
+}
+
 bool Qwen35::build(const ModelFile& file, const ModelOptions& o, std::string* err) {
   const json& h = file.header();
   Config c = GgufMeta::is(file) ? read_gguf_config(file) : read_config(h);
@@ -654,10 +666,14 @@ bool Qwen35::build(const ModelFile& file, const ModelOptions& o, std::string* er
   draft_companion_ = c.draft_companion;
   layers_ = c.layers;
   std::vector<Drafter> drafters;
-  if (!choose_drafters(o, {c.mtp, c.dflash2, c.mtp_companion >= 0, c.draft_companion >= 0}, &drafters, err))
-    return false;
-  for (Drafter kind : drafters)
+  DrafterSources sources{c.mtp, c.dflash2, c.mtp_companion >= 0, c.dflash2 && c.draft_companion >= 0};
+  sources.dspine = c.dspine;
+  sources.dspine_beside = c.dspine && c.draft_companion >= 0;
+  if (!choose_drafters(o, sources, &drafters, err)) return false;
+  for (Drafter kind : drafters) {
     if (kind == Drafter::kDFlash2) (void)parse_dflash2_spec(c.draft, c);
+    if (kind == Drafter::kDSpine) (void)dspine::taps(c.draft, {c.hidden, c.vocab, c.layers});
+  }
   if (!tables_.set_activations(o.activations, declared_activations(file), o.fp4_inputs, err)) return false;
   Tables& T = tables_;
   const auto nf = name_fn();
@@ -688,8 +704,8 @@ bool Qwen35::build(const ModelFile& file, const ModelOptions& o, std::string* er
       m.ring = T.state(ring);
       add_drafter(kind, T.block(b), FLYX_MAX_ROWS - 1);
     } else {
-      dflash2_block_ = dflash2(c.draft, c);
-      add_drafter(kind, dflash2_block_, c.draft.at("block").get<int>() - 1);
+      block_drafter_ = kind == Drafter::kDSpine ? describe_dspine(c.draft, c) : dflash2(c.draft, c);
+      add_drafter(kind, block_drafter_, c.draft.at("block").get<int>() - 1);
     }
   }
   build_vision(file, c);
@@ -701,9 +717,9 @@ void Qwen35::add_layers(std::vector<flyx_node>* p) const {
   for (size_t i = 0; i < mixer_.size(); ++i) {
     p->push_back({FLYX_NODE_RUN, mixer_[i], 0, 0});
     p->push_back({FLYX_NODE_RUN, mlp_[i], 0, 0});
-    if (dflash2_block_ >= 0)  // its features, whichever drafter drafts: its context stays current
+    if (block_drafter_ >= 0)  // its features, whichever drafter drafts: its context stays current
       for (size_t s = 0; s < taps_.size(); ++s)
-        if (taps_[s] == int(i) + 1) p->push_back({FLYX_NODE_TAP, dflash2_block_, int32_t(s), 0});
+        if (taps_[s] == int(i) + 1) p->push_back({FLYX_NODE_TAP, block_drafter_, int32_t(s), 0});
   }
 }
 

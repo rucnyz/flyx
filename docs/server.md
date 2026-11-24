@@ -34,8 +34,8 @@ All commands that load a model share the parser in `apps/common/engine_flags.cpp
 | `--kv-method` | `auto[:BITS]` \| `exact` \| `strata[:BITS]` | `auto` (`BITS=2`) | Decode KV read mode. `BITS` in `2..4` (default `2`). `auto`: exact attention up to `kv_gpu`, then StrataFlux once KV spills to host RAM; `exact`: exact attention everywhere; `strata`: StrataFlux everywhere. A file with a DV drafter reads exactly under `auto`, with `--drafter dv` or without (its trees read every position, and naming it changes no token); `strata` with DV drafting is refused. |
 | `--backend` | `cuda` \| `cpu_ref` | first available (`cuda`) | Backend shared library to load. Select GPU with `CUDA_VISIBLE_DEVICES`. |
 | `--backend-opt` | `K=V` (repeatable) | none | Backend-specific option (also `FLYX_BACKEND_OPTIONS=K=V,...`). Unknown keys fail load. |
-| `--drafter` | `mtp` \| `dflash2` \| `dv` \| `all` \| `none` | auto | Active drafters. Default enables all `--drafter-file` drafters plus the model's embedded MTP (or embedded DFlash2). Multiple active drafters are selected dynamically per round. A DV drafter (in a DV `.flyx` file, [DV](design/dv.md)) drafts only when named (`dv` or `all`): its warm-up, its trees of 15 and of the file's width, plain decoding and lookup rounds are then chosen every round. |
-| `--drafter-file` | `PATH` \| `HF_REPO` (repeatable) | none | Sidecar MTP GGUF (`MTP/mtp-*.gguf`) or DFlash2 drafter (`.flyx` or HF repo directory). |
+| `--drafter` | `mtp` \| `dflash2` \| `dspine` \| `dv` \| `all` \| `none` | auto | Active drafters. Default enables all `--drafter-file` drafters plus the model's embedded MTP (or embedded block drafter, DFlash2 or DSpine). Multiple active drafters are selected dynamically per round. A DV drafter (in a DV `.flyx` file, [DV](design/dv.md)) drafts only when named (`dv` or `all`): its warm-up, its trees of 15 and of the file's width, plain decoding and lookup rounds are then chosen every round. |
+| `--drafter-file` | `PATH` \| `HF_REPO` (repeatable) | none | Sidecar MTP GGUF (`MTP/mtp-*.gguf`) or block drafter, DFlash2 or DSpine (`.flyx` or HF repo directory; one block drafter a model). |
 | `--mmproj` | `PATH` | auto (HF Hub) / none (local) | Multimodal vision projector GGUF (`mmproj-*.gguf`, e.g., `mmproj-BF16.gguf`) paired with the model file. Auto-fetched from Hugging Face Hub repos when available unless `--no-vision` is set. |
 | `--no-vision` | flag | off | Disable loading any vision encoder / `mmproj` projector even if available. |
 | `--vision-offload` | flag | on (`disk`) | Shorthand for `--vision-device disk`: offload vision weights to an auto-deleted temp file on disk (0 VRAM, 0 locked host RAM) and stream via OS page cache into GPU staging. |
@@ -116,11 +116,11 @@ Defined in `core/os/env.h` (plus CUDA / Python standard variables). Explicit CLI
 | `FLYX_BACKEND` | `cuda` \| `cpu_ref` | Default backend when `--backend` is unset. |
 | `FLYX_BACKEND_DIR` | path | Directory searched for `libflyx-*.so` / `libflyx-*.dll`. |
 | `FLYX_BACKEND_OPTIONS` | `K=V,K2=V2` | Prepended before `--backend-opt` flags. |
-| `FLYX_DRAFTER` | `mtp` \| `dflash2` \| `dv` \| `all` \| `none` | Default drafter mode when `--drafter` is unset. |
+| `FLYX_DRAFTER` | `mtp` \| `dflash2` \| `dspine` \| `dv` \| `all` \| `none` | Default drafter mode when `--drafter` is unset. |
 | `FLYX_ACTIVATIONS` | `exact` \| `nvfp4` | Default activation mode when `--activations` is unset. |
 | `FLYX_LOOKUP` | `0` \| `1` | Enable/disable prompt lookup (`0` = `--no-lookup`). |
 | `FLYX_DRAFT_TREES` | `0` \| `1` | Enable/disable DFlash2 draft trees (`1` = `--draft-trees`). |
-| `FLYX_ADAPTIVE` | `0` \| `1` | Enable/disable intra-round confidence optimal stopping on adaptive drafter plans (`1`, default). Enabled for sequential drafters (MTP) and for block drafters on targets whose verify cost scales steeply with width; dense targets paired with block drafters (DFlash2) verify the chooser's fixed widths. |
+| `FLYX_ADAPTIVE` | `0` \| `1` | Enable/disable intra-round confidence optimal stopping on adaptive drafter plans (`1`, default). Enabled for sequential drafters (MTP) and for block drafters on targets whose verify cost scales steeply with width; dense targets paired with block drafters (DFlash2, DSpine) verify the chooser's fixed widths. |
 | `FLYX_CHAT_NATIVE` | `0` \| `1` | Force Jinja engine (`0`) instead of native chat renderer (`1`, default). |
 | `FLYX_API_KEY` / `FLYX_KEY` | string | Default server API key when `--api-key` is unset. |
 | `FLYX_MODELS_DIR` | paths (`:` Linux / `;` Win) | Additional local model directories appended to `--models-dir`. |

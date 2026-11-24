@@ -128,7 +128,7 @@ function Serving({ tm, again, retry, browse }) {
         <i style=${{ width: L.state === "loading" ? "" : (p.total ? 100 * p.done / p.total : 0) + "%" }}></i></div>
       <div class="prog" id="ld-sub">${sub}</div>
       <div class="srv-dr" id="ld-drafters">${drafters.map((d) => html`
-        <div class="dr"><span class="k">${d.kind === "mtp" ? "MTP" : d.kind === "dflash2" ? "DFlash2" : d.kind}</span>
+        <div class="dr"><span class="k">${drafterLabel(d.kind)}</span>
           <span class="f">${(d.from === "model file" ? t("the model file's own layer") : d.from) + (d.size ? " · " + gb(d.size) + " GB" : "")}</span></div>`)}
         ${model.loaded && !busy && model.vision ? html`
         <div class="dr"><span class="k">${t("Vision")}</span>
@@ -148,6 +148,7 @@ function Serving({ tm, again, retry, browse }) {
 const kindOf = (d) => /\.gguf$/i.test(d) ? "mtp" : "dflash2";
 const normVisionDev = (v) => (v === "host" || v === "cpu") ? "host" : v === "gpu" ? "gpu" : v === "auto" ? "auto" : "disk";
 const normVisionQuant = (v) => (v === "exact" || v === "bf16") ? "exact" : (v === "nvfp4" || v === "fp4") ? "nvfp4" : "q8";
+const drafterLabel = (k) => ({ mtp: "MTP", dflash2: "DFlash2", dspine: "DSpine" })[k] || k;
 
 // The settings of a want as the form shows them, for comparing with what is loaded.
 function shown(w) {
@@ -517,7 +518,7 @@ export function ModelPage({ active, libraryAsked, currentAsked }) {
   // its default; else what a model brings along.
   function defaultDrafter() {
     if (loadedWant && loadedWant.speculative !== false && !loadedWant.drafter && !loadedWant.drafters?.length) {
-      const list = draftersOf(L).map((d) => (d.kind === "mtp" ? "MTP" : d.kind === "dflash2" ? "DFlash2" : d.kind) + " · " +
+      const list = draftersOf(L).map((d) => drafterLabel(d.kind) + " · " +
         (d.from === "model file" ? t("the model file's own layer") : t("from " + d.from + (d.size ? " (" + gb(d.size) + " GB)" : ""))));
       if (!list.length && model.drafter) list.push(model.drafter.toUpperCase() + " · " + t("the model file's own layer"));
       return list.length ? { tag: "in use", tone: "ok", lines: list } : { tag: "none", tone: "", lines: [t("This model loaded no drafter: plain decoding.")] };

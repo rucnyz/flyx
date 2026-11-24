@@ -28,9 +28,10 @@ using interfaces::ModelOptions;
 
 // The drafters the architectures here can have.  Only models/ knows them by
 // name: the engine sees drafters by number and the round widths each offers
-// (draft_widths).  DV (models/dv.h) drafts trees, and its canvas follows its
-// own rounds only (Model::restarts).
-enum class Drafter { kNone, kMtp, kDFlash2, kDv };
+// (draft_widths).  DFlash2 and DSpine (models/dspine.h) draft a block at once;
+// DV (models/dv.h) drafts trees, and its canvas follows its own rounds only
+// (Model::restarts).
+enum class Drafter { kNone, kMtp, kDFlash2, kDSpine, kDv };
 const char* drafter_name(Drafter d);
 
 // What a .flyx file says of its NVFP4 weights' inputs ("quant": {"activations": ...}; "" if nothing).
@@ -41,12 +42,13 @@ struct DrafterSources {
   bool mtp = false, dflash2 = false;                // the model has one
   bool mtp_beside = false, dflash2_beside = false;  // ... from a drafter file
   bool dv = false;                                  // the model file has a DV drafter
+  bool dspine = false, dspine_beside = false;       // a DSpine drafter (where a DFlash2 one would be)
 };
 
 // The drafters a model holds, the MTP layer first: the one
 // named; "all": every one it has; none named: every drafter given in a file of
 // its own, and of the model file's own the MTP layer if it has one, else its
-// DFlash2 drafter (a file with both keeps the one measured faster on it, until
+// block drafter, DFlash2 or DSpine (a file with both keeps the one measured faster on it, until
 // choosing between them is measured there); its DV drafter only when named
 // ("dv", "all"); none when the options say so.  DV drafts alone:
 // beside another drafter it is refused.
@@ -142,7 +144,7 @@ class Model : public interfaces::Model {
 
   struct DrafterBlock {
     Drafter kind;
-    int block;       // its FLYX_BLOCK_MTP / FLYX_BLOCK_DFLASH2 / FLYX_BLOCK_DV block
+    int block;       // its FLYX_BLOCK_MTP / FLYX_BLOCK_DFLASH2 / FLYX_BLOCK_DSPINE / FLYX_BLOCK_DV block
     int max_drafts;  // the most it proposes in a round
   };
   Tables tables_;
