@@ -1,7 +1,7 @@
 // Copyright 2026 The flyx Authors. SPDX-License-Identifier: Apache-2.0
 // Qwen3.5 from its model file: the layer math as block flags (attention with
 // an output gate, (1 + w) norms and partial rotary; GDN with a plain-weight
-// output norm; the DFlash2 and DSpine drafters with plain norms), and the two ways a file
+// output norm; the DFlash2, DFlash and DSpine drafters with plain norms), and the two ways a file
 // stores the same model:
 //   .flyx  the config in the header, tensors under the names
 //             python/convert writes ("target.L3.attn.q"), laid out for the

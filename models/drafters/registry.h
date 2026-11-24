@@ -1,8 +1,8 @@
 // Copyright 2026 The flyx Authors. SPDX-License-Identifier: Apache-2.0
 // Unified speculative drafter discovery, attachment, and program-node emission shared across
 // all target model architectures. Any architecture supplies a TargetSpec (and optional MtpHooks)
-// to automatically support DFlash2 (.flyx / HF safetensors / arch="dflash" GGUF), DSpine (.flyx /
-// HF safetensors) and MTP.  A model holds one block drafter (DFlash2 or DSpine) at most.
+// to automatically support DFlash2 (.flyx / HF safetensors / arch="dflash" GGUF), DFlash and DSpine
+// (.flyx / HF safetensors) and MTP.  A model holds one block drafter (DFlash2, DFlash or DSpine) at most.
 #pragma once
 
 #include <optional>
@@ -31,14 +31,15 @@ class DrafterRegistry {
   // Validate specs of chosen drafters before target tensor binding (refuses bad configs early).
   void validate_selected(const ModelFile& file, const std::vector<Drafter>& selected, const TargetSpec& target);
 
-  // Build blocks for `kind` (kMtp, kDFlash2 or kDSpine) in `T`, returning the drafter block index and its max drafts.
+  // Build blocks for `kind` (kMtp, kDFlash2, kDFlash or kDSpine) in `T`, returning the drafter block index and its
+  // max drafts.
   int attach(Drafter kind, const ModelFile& file, Tables& T, const TargetSpec& target, const MtpHooks* mtp,
              int* max_drafts_out);
 
   // Emit FLYX_NODE_TAP nodes for all active tap-consuming drafters after 1-based layer `layer_1based`.
   void emit_taps(std::vector<flyx_node>* p, int layer_1based) const;
 
-  // Emit FLYX_NODE_CONTEXT nodes for all attached drafters managed by this registry (MTP, DFlash2, DSpine).
+  // Emit FLYX_NODE_CONTEXT nodes for all attached drafters managed by this registry (MTP, DFlash2, DFlash, DSpine).
   void emit_contexts(std::vector<flyx_node>* p) const;
 
  private:
@@ -47,7 +48,7 @@ class DrafterRegistry {
 
   DrafterSources sources_{};
   int mtp_companion_ = -1;
-  int dflash2_companion_ = -1;  // the companion holding the DFlash2 drafter, -1: the model file ("draft")
+  int dflash2_companion_ = -1;  // the companion holding the DFlash2 or DFlash drafter, -1: the model file
   int dspine_companion_ = -1;   // the companion holding the DSpine drafter, -1: the model file ("draft")
   std::optional<DFlash2Spec> dflash2_spec_;
   std::optional<DSpineSpec> dspine_spec_;

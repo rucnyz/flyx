@@ -325,7 +325,7 @@ export default {
     "Nothing matches.": "一致するものがありません。",
     "Nothing downloaded yet. Fetch a model from Hugging Face, or give a path.": "まだ何もダウンロードされていません。Hugging Face からモデルを取得するか、パスを指定してください。",
     "Add to settings": "設定に追加",
-    "A DFlash2 drafter is published for this model.": "このモデル用の DFlash2 drafter が公開されています。", "A DSpine drafter is published for this model.": "このモデル用の DSpine drafter が公開されています。",
+    "A DFlash2 drafter is published for this model.": "このモデル用の DFlash2 drafter が公開されています。", "A DSpine drafter is published for this model.": "このモデル用の DSpine drafter が公開されています。", "A DFlash drafter is published for this model.": "このモデル用の DFlash drafter が公開されています。",
     "It often adds speed on top of MTP:": "MTP に加えてさらに高速化できることが多いです：",
     "Looked in the Hugging Face cache": "Hugging Face キャッシュを検索済み",
     "(the default)": "（デフォルト）",

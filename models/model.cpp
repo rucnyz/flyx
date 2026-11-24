@@ -14,6 +14,7 @@ const char* drafter_name(Drafter d) {
   switch (d) {
     case Drafter::kMtp: return "mtp";
     case Drafter::kDFlash2: return "dflash2";
+    case Drafter::kDFlash: return "dflash";
     case Drafter::kDSpine: return "dspine";
     case Drafter::kDv: return "dv";
     default: return "none";
@@ -33,6 +34,7 @@ DrafterTraits drafter_traits(Drafter d) {
   switch (d) {
     case Drafter::kMtp: return {/*sequential=*/true, false, false};
     case Drafter::kDFlash2: return {false, false, /*stretch_block=*/true};
+    case Drafter::kDFlash: return {false, false, /*stretch_block=*/true};  // DFlash2's block, both ways
     case Drafter::kDSpine: return {false, false, false};  // its block at most: lowering refuses a wider round
     case Drafter::kDv: return {false, /*tree_only=*/true, false};
   }
@@ -103,7 +105,7 @@ bool choose_drafters(const ModelOptions& o, const DrafterSources& has, std::vect
   if (!interfaces::parse_drafter_mode(o.drafter, &mode))
     return *err = "unknown drafter '" + o.drafter + "' (" + interfaces::kDrafterModes + ")", false;
   if (!o.speculative || mode == interfaces::DrafterMode::kNone) return true;
-  bool mtp = false, dflash2 = false, dspine = false, dv = false;
+  bool mtp = false, dflash2 = false, dflash = false, dspine = false, dv = false;
   switch (mode) {
     case interfaces::DrafterMode::kMtp:
       if (!has.mtp) return *err = "the model file has no MTP layer", false;
@@ -112,6 +114,10 @@ bool choose_drafters(const ModelOptions& o, const DrafterSources& has, std::vect
     case interfaces::DrafterMode::kDFlash2:
       if (!has.dflash2) return *err = "the model file has no DFlash2 drafter", false;
       dflash2 = true;
+      break;
+    case interfaces::DrafterMode::kDFlash:
+      if (!has.dflash) return *err = "the model has no DFlash drafter", false;
+      dflash = true;
       break;
     case interfaces::DrafterMode::kDSpine:
       if (!has.dspine) return *err = "the model has no DSpine drafter", false;
@@ -124,6 +130,7 @@ bool choose_drafters(const ModelOptions& o, const DrafterSources& has, std::vect
     case interfaces::DrafterMode::kAll:
       mtp = has.mtp;
       dflash2 = has.dflash2;
+      dflash = has.dflash;
       dspine = has.dspine;
       dv = has.dv;
       break;
@@ -132,9 +139,10 @@ bool choose_drafters(const ModelOptions& o, const DrafterSources& has, std::vect
       // (MTP was measured faster on the 4B, 462 against 341 tok/s: a file with both keeps it until choosing between
       // them every round is measured there).  DV only when named (dv, all).
       const bool own_mtp = has.mtp && !has.mtp_beside, own_dflash2 = has.dflash2 && !has.dflash2_beside;
-      const bool own_dspine = has.dspine && !has.dspine_beside;
+      const bool own_dflash = has.dflash && !has.dflash_beside, own_dspine = has.dspine && !has.dspine_beside;
       mtp = has.mtp_beside || own_mtp;
       dflash2 = has.dflash2_beside || (own_dflash2 && !own_mtp);
+      dflash = has.dflash_beside || (own_dflash && !own_mtp);
       dspine = has.dspine_beside || (own_dspine && !own_mtp);
       break;
     }
@@ -142,9 +150,10 @@ bool choose_drafters(const ModelOptions& o, const DrafterSources& has, std::vect
   }
   // DV's canvas follows its own rounds only, and the controller weighs its warm-up against plain decoding's and
   // lookup's rounds alone: no drafter beside it.
-  if (dv && (mtp || dflash2 || dspine)) return *err = "DV drafts alone: not beside another drafter", false;
+  if (dv && (mtp || dflash2 || dflash || dspine)) return *err = "DV drafts alone: not beside another drafter", false;
   if (mtp) out->push_back(Drafter::kMtp);
   if (dflash2) out->push_back(Drafter::kDFlash2);
+  if (dflash) out->push_back(Drafter::kDFlash);
   if (dspine) out->push_back(Drafter::kDSpine);
   if (dv) out->push_back(Drafter::kDv);
   return true;

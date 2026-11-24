@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#define FLYX_BACKEND_ABI_VERSION 45u
+#define FLYX_BACKEND_ABI_VERSION 46u
 #define FLYX_BACKEND_ENTRY "flyx_backend_get_api"
 /* How a backend library exports its entry. */
 #if defined(_WIN32)
@@ -373,7 +373,11 @@ typedef struct {
  * top sel_topk, and the selector walk (sel_hid, sel_pred, sel_succ).  Its
  * context: fc(the residual rows tapped at n_taps points, side by side) ->
  * hidden_norm -> each layer's k (k_norm, rope) and v into its cache.  The
- * embedding and head blocks may hold packed GGML blocks. */
+ * embedding and head blocks may hold packed GGML blocks.
+ * DFlash, the drafter DFlash2 grew from (ABI 46): conv_taps 0 (conv_group 0,
+ * no conv weights: each layer's attention and MLP unwrapped) and sel_rank 0
+ * (sel_topk 1, no selector weights: each row's draft the head's best, the
+ * lower id on ties). */
 typedef struct {
   int32_t hidden, n_heads, n_kv, head_dim, inter;
   int32_t block, mask_token, n_taps, conv_taps, conv_group, sel_rank, sel_topk;
@@ -388,7 +392,7 @@ typedef struct {
 
 /* A DFlash2 layer: attention (q, k, v, o; q/k norms; rotary on all dims) and
  * MLP, each wrapped in a grouped dynamic conv whose coefficients are
- * base [2][conv_taps][hidden] plus proj(h). */
+ * base [2][conv_taps][hidden] plus proj(h) (DFlash's: none, the four -1). */
 typedef struct {
   flyx_norm norm, post_norm, q_norm, k_norm;
   int32_t q, k, v, o, gate, up, down;

@@ -1,5 +1,5 @@
 # Copyright 2026 The flyx Authors. SPDX-License-Identifier: Apache-2.0
-"""HuggingFace Qwen3.5 (+ optional DFlash2 or DSpine drafter), Qwen3 or Llama (+ optional DV) -> one .flyx file.
+"""HuggingFace Qwen3.5 or Qwen3 (+ optional block drafter) or Llama (+ optional DV) -> one .flyx file.
 
     python -m flyx_convert --model Qwen3.5-4B/ --draft Qwen3.5-4B-DFlash2/ -o qwen35-4b.flyx
     python -m flyx_convert --draft Qwen3.8-27B-DFlash2/ -o qwen38-27b-dflash2.flyx   # a drafter file
@@ -8,8 +8,8 @@
     python -m flyx_convert --model MiniCPM5-1B/ --dv minicpm5-dv/ -o minicpm5-1b-dv-res2.flyx  # Llama with DV
     python -m flyx_convert --model MiniCPM5-1B/ --lora minicpm5-vlora/ -o minicpm5-1b-vlora.flyx  # its V-LoRA
 
-A drafter file holds a block drafter (DFlash2 or DSpine, dspine.py) alone: the engine takes
-it beside a model of any format, a GGUF included (--drafter-file).
+A drafter file holds a block drafter (DFlash2, DFlash or DSpine, dspine.py) alone: the engine
+takes it beside a model of any format, a GGUF included (--drafter-file).
 
 A DV drafter (bifill-dv's canvas and selector, docs/design/dv.md) comes from
 the directory python/convert/export_dv.py writes, for a Llama (dv.py); the
@@ -195,16 +195,26 @@ def canonical_draft_config(sc: dict, target: dict | None) -> dict:
       speculators' ("speculators_model_type": "dflash2"; the layers under "transformer_layer_config";
         aux_hidden_state_layer_ids: indices into the target's hidden states, 0 the embedding);
       z-lab's and Inco's ("architectures": ["DFlash2DraftModel"], "dflash_config"; target_layer_ids: the target
-        layers whose outputs it reads, hidden_states[id + 1] in their code).
+        layers whose outputs it reads, hidden_states[id + 1] in their code);
+    or a DFlash drafter's, what DFlash2 grew from (z-lab's "architectures": ["DFlashDraftModel"], block_size beside
+    dflash_config): kind "dflash", DFlash2's block without convolutions (conv_taps 0) or selector (sel_rank 0: each
+    row's draft the head's best).
     taps: the residual stream after that many target layers.  window: each position attends to the positions less
     than that far from it, both ways (0: all).  target: the model's canonical config, or None for a drafter file of
     its own (the engine checks it against the model it is given with; "target" below names what it was made for)."""
     if is_dspine(sc):
         return canonical_dspine_config(sc, target)
+    dflash = False  # DFlash: no convolutions, no selector
     if "dflash_config" in sc:
-        if "DFlash2DraftModel" not in sc.get("architectures", []):
-            raise ValueError(f"drafter architectures {sc.get('architectures')!r}: DFlash2DraftModel is supported")
+        archs = sc.get("architectures", [])
+        dflash = "DFlashDraftModel" in archs
+        if "DFlash2DraftModel" not in archs and not dflash:
+            raise ValueError(f"drafter architectures {archs!r}: DFlash2DraftModel, DFlashDraftModel and DSpine's are "
+                             "supported")
         dc, tl = sc["dflash_config"], sc
+        later = sorted(k for k in ("conv_kernel_size", "conv_group_size", "selector_rank", "selector_top_k") if k in dc)
+        if dflash and later:
+            raise ValueError(f"a DFlashDraftModel with DFlash2's {later}: which drafter it is is unclear")
         taps = [int(i) + 1 for i in dc["target_layer_ids"]]
         vocab, target_hidden = tl["vocab_size"], tl["hidden_size"]
         causal = sc.get("is_causal")  # their attention: None = causal where the layer slides
@@ -238,15 +248,18 @@ def canonical_draft_config(sc: dict, target: dict | None) -> dict:
         if any(not 1 <= t <= target["layers"] for t in taps):
             raise ValueError(f"drafter taps {taps} outside the target's {target['layers']} layers")
     hd = tl.get("head_dim") or tl["hidden_size"] // tl["num_attention_heads"]
+    if dflash:
+        conv = {"conv_taps": 0, "conv_group": 0, "sel_rank": 0, "sel_topk": 1}
+    else:
+        conv = {"conv_taps": dc.get("conv_kernel_size", 2), "conv_group": dc.get("conv_group_size", 16),
+                "sel_rank": dc.get("selector_rank", 256), "sel_topk": dc.get("selector_top_k", 16)}
     return {
-        "kind": "dflash2", "hidden": tl["hidden_size"], "layers": tl["num_hidden_layers"],
+        "kind": "dflash" if dflash else "dflash2", "hidden": tl["hidden_size"], "layers": tl["num_hidden_layers"],
         "n_heads": tl["num_attention_heads"], "n_kv": tl["num_key_value_heads"], "head_dim": hd,
         "inter": tl["intermediate_size"], "eps": tl["rms_norm_eps"],
         "rope_theta": float(rp.get("rope_theta", tl.get("rope_theta", 10000.0))),
-        "block": dc["block_size"], "mask_token": dc["mask_token_id"], "taps": taps,
-        "conv_taps": dc.get("conv_kernel_size", 2), "conv_group": dc.get("conv_group_size", 16),
-        "sel_rank": dc.get("selector_rank", 256), "sel_topk": dc.get("selector_top_k", 16),
-        "window": window,
+        "block": dc["block_size"] if "block_size" in dc else sc["block_size"], "mask_token": dc["mask_token_id"],
+        "taps": taps, **conv, "window": window,
         "target": {"hidden": target_hidden, "vocab": vocab,
                    "layers": target["layers"] if target else sc.get("num_target_layers")},
     }
@@ -380,9 +393,13 @@ def convert(model_dir: str, out: str, draft_dir: str | None = None, log=print, a
     arch = arch_of(hf_cfg)
     cfg = canonical_target_config(tc) if arch == "qwen35" else canonical_dense_config(tc)
     if arch == "llama" and draft_dir:
-        raise ValueError("a block drafter is only supported for Qwen3.5 (DFlash2, DSpine) and Qwen3 (DSpine)")
-    if arch == "qwen3" and draft_dir and not is_dspine(_read_config(os.path.join(draft_dir, "config.json"))):
-        raise ValueError("a DFlash2 drafter is only supported for Qwen3.5 (a Qwen3 model takes a DSpine drafter)")
+        raise ValueError("a block drafter is only supported for Qwen3.5 (DFlash2, DFlash, DSpine) and Qwen3 (DFlash, "
+                         "DSpine)")
+    if arch == "qwen3" and draft_dir:
+        dcfg = _read_config(os.path.join(draft_dir, "config.json"))
+        if not is_dspine(dcfg) and "DFlashDraftModel" not in dcfg.get("architectures", []):
+            raise ValueError("a DFlash2 drafter is only supported for Qwen3.5 (a Qwen3 model takes a DFlash or DSpine "
+                             "drafter)")
     if arch != "llama" and dv_dir:
         raise ValueError("a DV drafter is only supported for Llama (MiniCPM5)")
     if lora_dir and has_lora(dv_dir):
@@ -499,14 +516,14 @@ def _add_draft(w: Writer, draft_dir: str, target: dict | None, log) -> dict:
 
 
 def convert_draft(draft_dir: str, out: str, log=print) -> None:
-    """A block drafter (DFlash2, DSpine) on its own -> a drafter file: the engine takes it beside a model of any
+    """A block drafter (DFlash2, DFlash, DSpine) on its own -> a drafter file: the engine takes it beside a model of any
     format (--drafter-file), and checks it against that model (the "target" its config names)."""
     w = Writer()
     draft = _add_draft(w, draft_dir, None, log)
     w.meta = {"arch": "drafter", "kind": "drafter", "draft": draft,
               "source": {"draft": os.path.basename(os.path.normpath(draft_dir))}}
     w.write(out)
-    kind = "DSpine" if draft["kind"] == "dspine" else "DFlash2"
+    kind = {"dspine": "DSpine", "dflash": "DFlash"}.get(draft["kind"], "DFlash2")
     log(f"wrote {out}: {len(w.entries)} entries, a {kind} drafter of {draft['layers']} layer(s), block {draft['block']}, "
         f"taps {draft['taps']}, window {draft['window'] or 'none'}")
 
@@ -609,17 +626,22 @@ def _check_mtp(layers, seen):
 
 
 def _check_draft(d, seen):
-    need = {"fc", "hidden_norm", "norm", "sel.pred", "sel.succ", "sel.hid"}
+    """DFlash2's tensors; DFlash's, its layers and fc and norms, and none of DFlash2's convolutions or selector."""
+    later = d["kind"] == "dflash2"
+    need = {"fc", "hidden_norm", "norm"} | ({"sel.pred", "sel.succ", "sel.hid"} if later else set())
     for j in range(d["layers"]):
-        need |= {f"L{j}.{n}" for n in (*_ATTN_LAYER_KEYS, *_DRAFT_CONV_KEYS)}
+        need |= {f"L{j}.{n}" for n in (*_ATTN_LAYER_KEYS, *(_DRAFT_CONV_KEYS if later else ()))}
     _check_tensors("draft", need, seen)
+    if not later and seen - need:
+        raise ValueError(f"a DFlash drafter with tensors it does not read: {sorted(seen - need)[:4]}")
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="flyx_convert", description=__doc__.splitlines()[0])
     ap.add_argument("--model", help="HuggingFace Qwen3.5, Qwen3 or Llama (MiniCPM5) directory (without it: --draft "
                                     "alone, a drafter file for --drafter-file)")
-    ap.add_argument("--draft", help="block drafter directory: DFlash2 (speculators' or z-lab's) or DSpine (optional)")
+    ap.add_argument("--draft", help="block drafter directory: DFlash2 (speculators' or z-lab's), DFlash (z-lab's) or "
+                                    "DSpine (optional)")
     ap.add_argument("--dv", help="DV drafter directory, as python/convert/export_dv.py writes it (optional; Llama), "
                                  "with the V-LoRA it holds")
     ap.add_argument("--lora", help="a V-LoRA alone: the directory export_dv.py --vlora writes (optional; Llama, Qwen3)")

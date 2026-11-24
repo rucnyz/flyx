@@ -470,7 +470,7 @@ bool select(const Repo& r, const Name& name, std::vector<RepoFile>* files, std::
     return *err = r.id + " is a transformers checkpoint (" +
                   (r.architectures.empty() ? std::string("its config names no architecture") : r.architectures[0]) +
                   "): flyx reads GGUF files (a GGUF repository of it, org/name-GGUF:QUANT) and block drafters (DFlash2, "
-                  "DSpine)",
+                  "DFlash, DSpine)",
            false;
   files->clear();
   if (flyx.size() == 1) {
@@ -487,7 +487,11 @@ std::string drafter_kind(const Repo& r) {
   auto has = [&](const char* a) {
     return std::find(r.architectures.begin(), r.architectures.end(), a) != r.architectures.end();
   };
-  return has("DSpineDraftModel") ? "dspine" : has("DFlash2DraftModel") ? "dflash2" : "";
+  // DFlashDraftModel: DFlash (a DSpine drafter published under that name reads as DSpineDraftModel, hub_cache.cpp)
+  return has("DSpineDraftModel")    ? "dspine"
+         : has("DFlash2DraftModel") ? "dflash2"
+         : has("DFlashDraftModel")  ? "dflash"
+                                    : "";
 }
 
 }  // namespace flyx::hub

@@ -1,5 +1,5 @@
 // Copyright 2026 The flyx Authors. SPDX-License-Identifier: Apache-2.0
-// A block drafter as its authors publish it, DFlash2's or DSpine's: config.json and *.safetensors in a directory.
+// A block drafter as its authors publish it, DFlash2's, DFlash's or DSpine's: config.json and *.safetensors in a directory.
 // Read into what python/convert/flyx_convert makes of it as a drafter file (--draft alone): the same "draft"
 // description (canonical_draft_config with no target) and the same tensors under the same names, their bytes read in
 // place (a DSpine drafter's stacked bridge tensors as views of each layer's part, flyx_convert/dspine.py).
@@ -175,12 +175,18 @@ json draft_config(const json& sc) {
   json dc, tl;
   std::vector<int64_t> taps;
   int64_t vocab, target_hidden;
-  json causal;  // null: causal where the layers slide (z-lab's code)
+  json causal;          // null: causal where the layers slide (z-lab's code)
+  bool dflash = false;  // DFlash (DFlashDraftModel): DFlash2's block without convolutions or selector
   if (sc.contains("dflash_config")) {
     const auto archs = sc.value("architectures", json::array());
-    if (std::find(archs.begin(), archs.end(), "DFlash2DraftModel") == archs.end())
-      throw std::runtime_error("drafter architectures " + archs.dump() + ": DFlash2DraftModel is supported");
+    dflash = std::find(archs.begin(), archs.end(), "DFlashDraftModel") != archs.end();
+    if (std::find(archs.begin(), archs.end(), "DFlash2DraftModel") == archs.end() && !dflash)
+      throw std::runtime_error("drafter architectures " + archs.dump() +
+                               ": DFlash2DraftModel, DFlashDraftModel and DSpine's are supported");
     dc = sc.at("dflash_config"), tl = sc;
+    for (const char* k : {"conv_kernel_size", "conv_group_size", "selector_rank", "selector_top_k"})
+      if (dflash && dc.contains(k))
+        throw std::runtime_error(std::string("a DFlashDraftModel with DFlash2's ") + k + ": which drafter it is is unclear");
     for (const auto& i : dc.at("target_layer_ids")) taps.push_back(i.get<int64_t>() + 1);
     vocab = tl.at("vocab_size").get<int64_t>(), target_hidden = tl.at("hidden_size").get<int64_t>();
     causal = sc.value("is_causal", json());
@@ -228,7 +234,7 @@ json draft_config(const json& sc) {
   if (rp.contains("rope_theta") && rp["rope_theta"].is_number()) theta = rp["rope_theta"].get<double>();
   else if (tl.contains("rope_theta") && tl["rope_theta"].is_number()) theta = tl["rope_theta"].get<double>();
   json d = json::object();
-  d["kind"] = "dflash2";
+  d["kind"] = dflash ? "dflash" : "dflash2";
   d["hidden"] = tl.at("hidden_size");
   d["layers"] = tl.at("num_hidden_layers");
   d["n_heads"] = tl.at("num_attention_heads");
@@ -237,13 +243,13 @@ json draft_config(const json& sc) {
   d["inter"] = tl.at("intermediate_size");
   d["eps"] = tl.at("rms_norm_eps");
   d["rope_theta"] = theta;
-  d["block"] = dc.at("block_size");
+  d["block"] = dc.contains("block_size") ? dc.at("block_size") : sc.at("block_size");  // DFlash's beside dflash_config
   d["mask_token"] = dc.at("mask_token_id");
   d["taps"] = taps;
-  d["conv_taps"] = dc.value("conv_kernel_size", json(2));
-  d["conv_group"] = dc.value("conv_group_size", json(16));
-  d["sel_rank"] = dc.value("selector_rank", json(256));
-  d["sel_topk"] = dc.value("selector_top_k", json(16));
+  d["conv_taps"] = dflash ? json(0) : dc.value("conv_kernel_size", json(2));
+  d["conv_group"] = dflash ? json(0) : dc.value("conv_group_size", json(16));
+  d["sel_rank"] = dflash ? json(0) : dc.value("selector_rank", json(256));
+  d["sel_topk"] = dflash ? json(1) : dc.value("selector_top_k", json(16));
   d["window"] = window;
   d["target"] = {{"hidden", target_hidden}, {"vocab", vocab}, {"layers", sc.value("num_target_layers", json())}};
   return d;
@@ -255,7 +261,7 @@ std::string inner_name(const std::string& name) {
 }
 
 // python/convert's _D_SKIP and _D_RULES: the drafter's tensor names as the engine knows them, or "" to leave out.
-// bare: a drafter without DFlash2's convolutions and selector (DSpine's layers), whose names they are not.
+// bare: a drafter without DFlash2's convolutions and selector (DFlash; DSpine's layers), whose names they are not.
 bool canonical(const std::string& name, std::string* out, bool bare = false) {
   static const std::regex skip(R"(^(embed_tokens\.|lm_head\.|verifier_norm\.|verifier_lm_head\.|t2d|d2t|mask_embedding).*)");
   static const std::vector<std::pair<std::regex, std::string>> rules = {
@@ -333,7 +339,7 @@ bool read_drafter_dir(const std::string& dir, std::vector<std::unique_ptr<os::Ma
       sc = json::parse(cfg_text);
     }
     const json draft = draft_config(sc);
-    const bool dspine = draft.at("kind") == "dspine";
+    const bool dspine = draft.at("kind") == "dspine", dflash = draft.at("kind") == "dflash";
     *out = {};
     out->arch = "drafter";
     out->header = {{"arch", "drafter"}, {"kind", "drafter"}, {"draft", draft},
@@ -362,7 +368,7 @@ bool read_drafter_dir(const std::string& dir, std::vector<std::unique_ptr<os::Ma
         const int stacked = dspine ? dspine_stacked(inner) : 0;
         std::string canon;
         if (!version && !terminal && !stacked &&
-            !(dspine ? canonical_dspine(it.key(), &canon) : canonical(it.key(), &canon)))
+            !(dspine ? canonical_dspine(it.key(), &canon) : canonical(it.key(), &canon, dflash)))
           return *err = "unknown draft tensor " + it.key(), false;
         if (!version && !terminal && !stacked && canon.empty()) continue;  // the target's embedding and head
         const json& r = it.value();
@@ -433,17 +439,20 @@ bool read_drafter_dir(const std::string& dir, std::vector<std::unique_ptr<os::Ma
     for (size_t i = 0; i < out->tensors.size(); ++i) out->tensors[i].name = out->names[i].c_str();
     // python/convert's _check_draft (flyx_convert/dspine.py's check_dspine)
     std::vector<std::string> need = {"fc", "hidden_norm", "norm"};
-    for (const char* n : dspine ? std::vector<const char*>{"bridge.codebook", "bridge.gate", "bridge.gate_bias",
-                                                           "bridge.pred", "bridge.prev"}
-                                : std::vector<const char*>{"sel.pred", "sel.succ", "sel.hid"})
+    // DFlash: its layers, fc and norms only (no tensor of DFlash2's convolutions or selector maps)
+    for (const char* n : dspine   ? std::vector<const char*>{"bridge.codebook", "bridge.gate", "bridge.gate_bias",
+                                                             "bridge.pred", "bridge.prev"}
+                         : dflash ? std::vector<const char*>{}
+                                  : std::vector<const char*>{"sel.pred", "sel.succ", "sel.hid"})
       need.push_back(n);
     for (int64_t j = 0; j < draft.at("layers").get<int64_t>(); ++j) {
       for (const char* n : {"in_norm", "post_norm", "attn.q", "attn.k", "attn.v", "attn.o", "attn.q_norm",
                             "attn.k_norm", "mlp.gate", "mlp.up", "mlp.down"})
         need.push_back("L" + std::to_string(j) + "." + n);
-      for (const char* n : dspine ? std::vector<const char*>{"bridge.read", "bridge.write"}
-                                  : std::vector<const char*>{"attn_conv.base", "attn_conv.proj", "mlp_conv.base",
-                                                             "mlp_conv.proj"})
+      for (const char* n : dspine   ? std::vector<const char*>{"bridge.read", "bridge.write"}
+                           : dflash ? std::vector<const char*>{}
+                                    : std::vector<const char*>{"attn_conv.base", "attn_conv.proj", "mlp_conv.base",
+                                                               "mlp_conv.proj"})
         need.push_back("L" + std::to_string(j) + "." + n);
     }
     std::sort(seen.begin(), seen.end());

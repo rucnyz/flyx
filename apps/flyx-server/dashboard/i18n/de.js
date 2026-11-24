@@ -325,7 +325,7 @@ export default {
     "Nothing matches.": "Keine Treffer.",
     "Nothing downloaded yet. Fetch a model from Hugging Face, or give a path.": "Noch nichts heruntergeladen. Ein Modell von Hugging Face laden oder einen Pfad angeben.",
     "Add to settings": "Zu Einstellungen hinzufügen",
-    "A DFlash2 drafter is published for this model.": "Für dieses Modell gibt es einen DFlash2-Drafter.", "A DSpine drafter is published for this model.": "Für dieses Modell gibt es einen DSpine-Drafter.",
+    "A DFlash2 drafter is published for this model.": "Für dieses Modell gibt es einen DFlash2-Drafter.", "A DSpine drafter is published for this model.": "Für dieses Modell gibt es einen DSpine-Drafter.", "A DFlash drafter is published for this model.": "Für dieses Modell gibt es einen DFlash-Drafter.",
     "It often adds speed on top of MTP:": "Er bringt oft zusätzliches Tempo über MTP hinaus:",
     "Looked in the Hugging Face cache": "Im Hugging Face-Cache gesucht",
     "(the default)": "(Standardort)",

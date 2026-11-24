@@ -115,8 +115,8 @@ bool split_gguf_name(const std::string& file_name);
 // names one.
 std::string quant_in_name(const std::string& file_name);
 
-// Whether the repository holds a block drafter (its config's architecture: DFlash2DraftModel, DSpineDraftModel), not
-// a transformers model; and which ("dflash2", "dspine"; "" none).
+// Whether the repository holds a block drafter (its config's architecture: DFlash2DraftModel, DFlashDraftModel, DSpineDraftModel), not
+// a transformers model; and which ("dflash2", "dflash", "dspine"; "" none).
 bool is_drafter(const Repo& r);
 std::string drafter_kind(const Repo& r);
 // The files `name` asks for: the GGUF of its quant (or the repository's only one), else a block drafter's

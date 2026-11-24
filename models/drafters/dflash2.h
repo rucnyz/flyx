@@ -6,6 +6,9 @@
 //   * a GGUF drafter file with general.architecture = "dflash" (non-Markov DFlash2 layout).
 // The blocks are built from the names python/convert gives the drafter's tensors ("draft.fc", "draft.L0.attn.q");
 // a GGUF file's own names are mapped from those, as an architecture's are (models/gguf.h).
+// DFlash, the drafter DFlash2 grew from (z-lab's DFlashDraftModel; a "draft" config of kind "dflash"), is the same
+// block without the grouped convolutions or the candidate selector (conv_taps 0, sel_rank 0, sel_topk 1): each row's
+// draft is the head's best.  It comes as a .flyx file or its authors' directory, never as a GGUF.
 #pragma once
 
 #include <vector>
@@ -20,14 +23,15 @@ namespace flyx::models::drafters {
 struct DFlash2Spec {
   flyx_dflash2_block block{};
   int layers = 0;
-  int tg2 = 0;
+  int tg2 = 0;             // a layer's conv coefficient rows; 0 for DFlash
   double eps = 0.0;
   std::vector<int> taps;   // 1-based layer indices (1..target.layers)
   bool gguf = false;       // the file's tensor names are llama.cpp's (arch "dflash")
+  bool dflash = false;     // DFlash: no convolutions, no selector
   int companion = -1;      // -1: embedded in target file; >= 0: companion index
 };
 
-// True if a companion header describes a drafter file (python/convert --draft: a DFlash2 or a DSpine drafter,
+// True if a companion header describes a drafter file (python/convert --draft: a DFlash2, DFlash or DSpine drafter,
 // models/drafters/dspine.h) or an arch="dflash" GGUF drafter.
 bool is_dflash_companion(const nlohmann::json& header);
 
@@ -36,7 +40,7 @@ bool is_dflash_companion(const nlohmann::json& header);
 // chosen; the rest of its config is read only when it drafts (parse_dflash2_*, parse_dspine_json).
 void check_made_for(const nlohmann::json& header, const TargetSpec& target);
 
-// Parse and validate a DFlash2 spec from canonical JSON ("draft" section in .flyx or drafter_dir).
+// Parse and validate a DFlash2 (or DFlash) spec from canonical JSON ("draft" section in .flyx or drafter_dir).
 DFlash2Spec parse_dflash2_json(const nlohmann::json& j, const TargetSpec& target, int companion);
 
 // Parse and validate a DFlash2 spec from a GGUF companion header with general.architecture == "dflash".

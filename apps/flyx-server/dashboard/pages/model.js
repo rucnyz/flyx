@@ -77,7 +77,7 @@ function FitTag({ size }) {
   return html`<span class=${"tag2 " + (fits ? "ok" : "bad")} title=${t(title)}>${t(fits ? "fits" : "too big")}</span>`;
 }
 
-const drafterLabel = (k) => ({ mtp: "MTP", dflash2: "DFlash2", dspine: "DSpine" })[k] || k;
+const drafterLabel = (k) => ({ mtp: "MTP", dflash2: "DFlash2", dflash: "DFlash", dspine: "DSpine" })[k] || k;
 
 // What is served and its state, its facts, a fetch's or a load's progress, an error.  With nothing
 // served it is the view's whole content: `again` loads the model the server remembers, `browse` shows the library.
@@ -163,10 +163,14 @@ function Serving({ tm, again, retry, browse }) {
 }
 
 // A drafter given as a GGUF is a DFlash2 or MTP file, as its name says; any other block drafter's kind by its name
-// as published (org/X-DFlash2, org/X-DSpine-b16), else the engine's choice from what the file holds ("": auto).
+// as published (org/X-DFlash2, org/X-DFlash-b16, org/X-DSpine-b16), else the engine's choice from what the file
+// holds ("": auto).
 const kindOf = (d) => /\.gguf$/i.test(d)
   ? (/(?:^|[\\/:-])dflash2?(?:[\\/._-]|$)/i.test(d) ? "dflash2" : "mtp")
-  : /dspine/i.test(d) ? "dspine" : /dflash/i.test(d) ? "dflash2" : "";
+  : /dspine/i.test(d) ? "dspine" : /dflash2/i.test(d) ? "dflash2" : /dflash/i.test(d) ? "dflash" : "";
+const publishedNote = { dspine: "A DSpine drafter is published for this model.",
+                        dflash2: "A DFlash2 drafter is published for this model.",
+                        dflash: "A DFlash drafter is published for this model." };
 const normVisionDev = (v) => (v === "host" || v === "cpu") ? "host" : v === "gpu" ? "gpu" : v === "auto" ? "auto" : "disk";
 const normVisionQuant = (v) => (v === "exact" || v === "bf16") ? "exact" : (v === "nvfp4" || v === "fp4") ? "nvfp4" : "q8";
 
@@ -1113,7 +1117,7 @@ export function ModelPage({ active, libraryAsked, currentAsked }) {
         ${j && j.drafter ? html`<div class="banner hint" id="hf-drafter-only"><div class="grow2">${t(repoSel + " is a drafter (" + gb(j.drafter.size) + " GB), not a model: it drafts for one, and is not loaded on its own.")}</div></div>` : ""}
         ${j && !j.drafter && !j.drafter_repo && !rows.length ? html`<p class="lead">${t("No GGUF files in " + repoSel + ".")}</p>` : ""}
         ${j && (j.known_drafters || []).length ? html`
-          <div class="banner hint" id="hf-drafters"><div class="grow2">${t(/dspine/i.test(j.known_drafters[0]) ? "A DSpine drafter is published for this model." : "A DFlash2 drafter is published for this model.")} ${t("It often adds speed on top of MTP:")}
+          <div class="banner hint" id="hf-drafters"><div class="grow2">${t(publishedNote[kindOf(j.known_drafters[0])] || publishedNote.dflash2)} ${t("It often adds speed on top of MTP:")}
             ${" "}<code>${j.known_drafters[0]}</code></div>
             ${model.id ? html`<button class="btn sm" onClick=${() => draftWith(j.known_drafters[0])}>${t("Add to settings")}</button>` : ""}</div>` : ""}
       </div>
