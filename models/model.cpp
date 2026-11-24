@@ -33,6 +33,7 @@ DrafterTraits drafter_traits(Drafter d) {
   switch (d) {
     case Drafter::kMtp: return {/*sequential=*/true, false, false};
     case Drafter::kDFlash2: return {false, false, /*stretch_block=*/true};
+    case Drafter::kDSpine: return {false, false, false};  // its block at most: lowering refuses a wider round
     case Drafter::kDv: return {false, /*tree_only=*/true, false};
   }
   return {false, false, false};

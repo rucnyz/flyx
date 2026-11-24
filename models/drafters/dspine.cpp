@@ -70,9 +70,11 @@ std::vector<int> dspine_taps(const json& d, const TargetSpec& t) {
   (void)dims(d, t, &layers, &eps);
   const json target = d.value("target", json::object());
   expect(target.value("vocab", t.vocab) == t.vocab, "made for another vocabulary");
-  expect(!target.contains("layers") || target["layers"].is_null() || target["layers"].get<int>() == t.layers,
-         "made for a target of " + std::to_string(target.value("layers", 0)) + " layers, not " +
-             std::to_string(t.layers));
+  if (target.contains("layers") && !target["layers"].is_null()) {  // null: the checkpoint did not say
+    const int made_for = target["layers"].get<int>();
+    expect(made_for == t.layers,
+           "made for a target of " + std::to_string(made_for) + " layers, not " + std::to_string(t.layers));
+  }
   std::vector<int> out;
   for (const auto& v : d.at("taps")) {
     const int64_t x = v.get<int64_t>();

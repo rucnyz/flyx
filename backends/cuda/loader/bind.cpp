@@ -5,6 +5,7 @@
 // stacked (q|k|v, gate|up, the GDN in-projection, every DFlash2 layer's
 // context k|v, DV's adapters on one input), norms as float.  Knows block
 // kinds, not models.
+#include <algorithm>
 #include <cstring>
 
 #include "backends/cuda/loader/loader.h"
@@ -28,6 +29,14 @@ struct StateMap {
 
 StateMap bind_states(flyx_bmodel* m, const flyx_model_desc& d) {
   StateMap sm;
+  // A block drafter's cache, whatever its layer count: its kernels (draft_ctx_kv, its block's attention) write and
+  // read binary16.
+  std::vector<bool> block_drafter_kv(size_t(std::max(d.n_states, 0)), false);
+  for (int i = 0; i < d.n_blocks; ++i) {
+    const flyx_block& b = d.blocks[i];
+    const int kv = b.kind == FLYX_BLOCK_DFLASH2 ? b.dflash2.kv : b.kind == FLYX_BLOCK_DSPINE ? b.dspine.kv : -1;
+    if (kv >= 0 && kv < d.n_states) block_drafter_kv[size_t(kv)] = true;
+  }
   for (int i = 0; i < d.n_states; ++i) {
     const flyx_state& s = d.states[i];
     sm.kv.push_back(-1);
@@ -38,9 +47,11 @@ StateMap bind_states(flyx_bmodel* m, const flyx_model_desc& d) {
       case FLYX_STATE_KV:
         sm.kv.back() = int(m->states.kv.size());
         // FP8 for the target's caches and the MTP layer's beside them (only drafting reads it, so its
-        // rounding moves how many drafts are accepted, never the output); a stacked drafter's stays binary16.
+        // rounding moves how many drafts are accepted, never the output); a block drafter's stays binary16.
         m->states.kv.push_back({s.layers, s.n_kv, s.head_dim,
-                                m->kv_fp8 && s.layers == 1 && !(s.draft && m->opt.draft_kv16), s.draft != 0});
+                                m->kv_fp8 && s.layers == 1 && !block_drafter_kv[size_t(i)] &&
+                                    !(s.draft && m->opt.draft_kv16),
+                                s.draft != 0});
         break;
       case FLYX_STATE_GDN:
         sm.gdn.back() = int(m->states.gdn.size());
