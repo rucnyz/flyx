@@ -1,0 +1,49 @@
+# Copyright 2026 The flyx Authors. SPDX-License-Identifier: Apache-2.0
+# Tuning table for NVIDIA RTX PRO 6000 Blackwell Server Edition, written by `cuda_bench tune gemm 6144x4096 4096x4096
+# 24576x4096 4096x12288` (GB/s of weights streamed in brackets): Qwen3-8B's bf16 GEMMs as the engine runs them
+# (q|k|v, attention out, mlp gate|up, mlp down), every other shape and family the RTX 5090's.
+# 2026-11-25, RTX PRO 6000 Blackwell Server Edition 96 GB, driver 620.70.06, CUDA 13.4.
+sku = "rtxpro6000"
+devices = ["NVIDIA RTX PRO 6000 Blackwell Server Edition"]
+inherit = "rtx5090"
+pdl = true
+
+[[gemm]]  # qwen3-8b attention q|k|v
+format = "bf16"
+n = 6144
+k = 4096
+rules = [
+  { rows = [1, 4], nt = 1, warps = 16, unroll = 8 },  # r1 1402 r4 1354
+  { rows = [5, 8], nt = 1, warps = 16, unroll = 16 },  # r8 1251
+  { rows = [9, 16], nt = 2, warps = 16, unroll = 8 },  # r16 1100
+]
+
+[[gemm]]  # qwen3-8b attention out
+format = "bf16"
+n = 4096
+k = 4096
+rules = [
+  { rows = [1, 1], nt = 1, warps = 16, unroll = 16 },  # r1 1340
+  { rows = [2, 16], nt = 4, warps = 16, unroll = 4 },  # r4 1306 r8 1295 r16 1255
+]
+
+[[gemm]]  # qwen3-8b mlp gate|up
+format = "bf16"
+n = 24576
+k = 4096
+rules = [
+  { rows = [1, 4], nt = 1, warps = 16, unroll = 4 },  # r1 1505 r4 1420
+  { rows = [5, 8], nt = 4, warps = 16, unroll = 4 },  # r8 1391
+  { rows = [9, 16], nt = 2, warps = 16, unroll = 8 },  # r16 1372
+]
+
+[[gemm]]  # qwen3-8b mlp down
+format = "bf16"
+n = 4096
+k = 12288
+rules = [
+  { rows = [1, 1], nt = 1, warps = 16, unroll = 8 },  # r1 1032
+  { rows = [2, 4], nt = 2, warps = 16, unroll = 8 },  # r4 1023
+  { rows = [5, 8], nt = 1, warps = 16, unroll = 16 },  # r8 1040
+  { rows = [9, 16], nt = 4, warps = 16, unroll = 4 },  # r16 1008
+]
