@@ -1,10 +1,12 @@
 // Copyright 2026 The flyx Authors. SPDX-License-Identifier: Apache-2.0
 // cuda_bench tune: this GPU's tuning table, measured (backends/cuda/variants/<arch>/tables/).
 //
-//   cuda_bench tune [FAMILIES] [FILE...] > backends/cuda/variants/sm120/tables/<sku>.toml
+//   cuda_bench tune [FAMILIES] [FILE...] [NxK...] > backends/cuda/variants/sm120/tables/<sku>.toml
 //
 // FAMILIES, a comma-separated list (every one without): gemm (Qwen3.5-4B's bf16, NVFP4 and W12 GEMMs shape by shape,
-// and from the same timings the bf16 and nvfp4 rules for shapes no table lists), rows (bf16 GEMMs of 17..64 rows on
+// and from the same timings the bf16 and nvfp4 rules for shapes no table lists; with NxK arguments, those bf16 GEMMs
+// alone, shape by shape, for a table that inherits the rest: a model's GEMMs as the engine runs them,
+// --backend-opt log_shapes), rows (bf16 GEMMs of 17..64 rows on
 // MiniCPM5-1B's layers, DV's adapters and head: bf16_rows, a round's in three parts, and bf16_draft, a drafting pass's
 // in one, shape by shape and as rules), blocks, blocks_q8, blocks_q8_runs, blocks_round (the GGML block kernels'
 // rules: candidates.toml's families of those names), and flash_gqa (FP8 grouped-query prefill on a full staged
@@ -27,6 +29,7 @@
 #include <array>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <limits>
@@ -633,9 +636,9 @@ const char* const kFmtName[] = {"bf16", "nvfp4", "w12"};
 
 // Per shape and row band the fastest configuration; for NVFP4 first the K partition with the best total over the
 // bands (one for all bands).  Returns ms[shape][configuration][band].
-std::vector<std::vector<std::array<double, 4>>> tune_gemm_shapes() {
+std::vector<std::vector<std::array<double, 4>>> tune_gemm_shapes(const std::vector<GemmShape>& shapes) {
   std::vector<std::vector<std::array<double, 4>>> all;
-  for (const GemmShape& s : kGemmShapes) {
+  for (const GemmShape& s : shapes) {
     const bool fp4 = s.fmt == 1;
     const size_t bytes = fp4 ? size_t(s.N) * s.K / 2 + size_t(s.N) * s.K / 16
                              : s.fmt == 2 ? w12_plane_bytes(s.N, s.K) : size_t(s.N) * s.K * 2;
@@ -1072,8 +1075,20 @@ int tune(int argc, char** argv) {
   }
   std::set<std::string> families;
   std::vector<std::string> files;
+  std::vector<std::string> given;  // NxK: bf16 GEMMs of a model (their comments' text)
+  std::vector<GemmShape> shapes;
   for (int i = 0; i < argc; ++i) {
     std::string a = argv[i];
+    int n = 0, k = 0, used = 0;
+    if (std::sscanf(a.c_str(), "%dx%d%n", &n, &k, &used) == 2 && used == int(a.size()) && n > 0 && k > 0) {
+      if (k % 32) {
+        std::fprintf(stderr, "cuda_bench tune: %s: K must be a multiple of 32\n", a.c_str());
+        return 2;
+      }
+      given.push_back("bf16 " + a);
+      shapes.push_back({0, n, k, nullptr});
+      continue;
+    }
     bool named = i == 0 && a.find('/') == std::string::npos && a.find('.') == std::string::npos;
     for (size_t p = 0; named && p < a.size();) {
       const size_t e = std::min(a.find(',', p), a.size());
@@ -1111,7 +1126,13 @@ int tune(int argc, char** argv) {
 
   if (want("flash_gqa")) tune_flash_gqa();
   std::vector<std::vector<std::array<double, 4>>> gemm_ms;
-  if (want("gemm")) gemm_ms = tune_gemm_shapes();
+  if (want("gemm") && !shapes.empty()) {
+    for (size_t i = 0; i < shapes.size(); ++i) shapes[i].what = given[i].c_str();
+    std::printf("# The GEMMs given alone: rules and every other family from the table this one inherits.\n");
+    (void)tune_gemm_shapes(shapes);
+  } else if (want("gemm")) {
+    gemm_ms = tune_gemm_shapes(std::vector<GemmShape>(std::begin(kGemmShapes), std::end(kGemmShapes)));
+  }
   std::vector<std::vector<std::array<double, 3>>> mt_ms;
   if (want("rows")) mt_ms = tune_mt_shapes();
   const bool blocks = want("blocks") || want("blocks_q8") || want("blocks_q8_runs") || want("blocks_round");
