@@ -3616,8 +3616,8 @@ int main(int argc, char** argv) {
   prefill_only_checks(plain.get(), g["cases"][0]["prompt"].get<std::vector<int32_t>>());
   refused_session(plain.get(), g["cases"][0]["prompt"].get<std::vector<int32_t>>());
   // Drafts are compared with the reference's from engines that draft from
-  // exact weights; the others draft from NVFP4 copies (the output must not
-  // change, only the drafts may).
+  // exact weights; the others draft from quantized copies (NVFP4 beside NVFP4
+  // weights, else Q8_0: the output must not change, only the drafts may).
   auto spec_exact = backend == "cpu_ref" ? nullptr : make(model, backend, true, g_block, false, "draft_weights=exact");
   auto mtp = make(model, backend, true, "mtp", false, backend == "cuda" ? "draft_weights=exact" : "");
   auto mtp_q = make(model, backend, true, "mtp");
