@@ -305,7 +305,8 @@ __device__ __forceinline__ void split8(const float* p, bool ok, uint4& hi, uint4
 // than the planes, which every block reads).  PARTS == 1 multiplies bf16 rows x.hi, over CH chunks of any count: what
 // a pass only drafting reads takes (DV's canvas), deterministic but not those bits.  Several weights on the same rows
 // go in one launch (MtGroups: a drafting pass's base weight and its adapter's a, or the adapters' b side by side):
-// each block computes 8 NT columns of one of them, from its own columns of the input.
+// each block computes 8 NT columns of one of them, from its own columns of the input.  More than 64 rows (three parts:
+// a round's, DSpine's walk) go in one launch too: blockIdx.y the block's 64 of them, every row's arithmetic the same.
 template <int NT, int CH, int UNROLL, int MT, int PARTS>
 __global__ void __launch_bounds__(32 * CH) k_gemm_skinny_mt(Parts x, const float* xf, int ldk, int K,
                                                             const __grid_constant__ MtGroups gs, int rows) {
@@ -332,8 +333,10 @@ __global__ void __launch_bounds__(32 * CH) k_gemm_skinny_mt(Parts x, const float
     wv[i] = n < N;
     wp[i] = o.W + size_t(wv[i] ? n : 0) * K + 8 * t;
   }
-  const bf16* xh = PARTS == 1 ? x.hi + o.x_col : nullptr;
-  const float* x32 = PARTS == 3 ? xf + o.x_col : nullptr;
+  const size_t r0 = size_t(blockIdx.y) * 64;  // the block's first row
+  rows = min(rows - int(r0), 64);
+  const bf16* xh = PARTS == 1 ? x.hi + o.x_col + r0 * ldk : nullptr;
+  const float* x32 = PARTS == 3 ? xf + o.x_col + r0 * ldk : nullptr;
   pdl_wait();  // the activations come from the kernel before
   const int s0 = warp * spans / CH, s1 = (warp + 1) * spans / CH;
   float acc[MT][NT][4];
@@ -397,7 +400,7 @@ __global__ void __launch_bounds__(32 * CH) k_gemm_skinny_mt(Parts x, const float
       for (int c = 0; c < CH; ++c) v += red[c][i][l][e];
       const int r = 16 * m + (l >> 2) + (e >> 1) * 8, col = n_base + i * 8 + 2 * (l & 3) + (e & 1);
       if (r < rows && col < N) {
-        const size_t at = size_t(r) * o.ldy + col;
+        const size_t at = (r0 + r) * o.ldy + col;
         if (o.y16) {
           o.y16[at] = __float2bfloat16_rn(v);
         } else {
@@ -1192,7 +1195,7 @@ void launch_skinny_mt(Parts p, const float* xf, int ldk, int K, MtGroups gs, int
       gs.g[i].first_block = blocks;
       blocks += ceil_div(gs.g[i].N, 8 * NT);
     }
-    const dim3 grid(blocks), block(32 * CH);
+    const dim3 grid(blocks, ceil_div(rows, 64)), block(32 * CH);
     auto run = [&](auto kernel) { launch_dependent(kernel, grid, block, L, p, xf, ldk, K, gs, rows); };
     if (rows <= 32) run(k_gemm_skinny_mt<NT, CH, UNROLL, 2, PARTS>);
     else if (rows <= 48) run(k_gemm_skinny_mt<NT, CH, UNROLL, 3, PARTS>);
@@ -1221,7 +1224,8 @@ const int kMtConfigCount = FLYX_BF16_MT_COUNT;
 void gemm_skinny_mt_cfg(int cfg, const float* x, int ldx, const bf16* W, int N, int K, float* y, int ldy, int rows,
                         bool accumulate, const Launch& L) {
   const bool three = cfg >= 0 && cfg < kMtConfigCount && kMtConfigs[cfg].parts == 3;
-  if (rows < 1 || rows > 64 || cfg < 0 || cfg >= kMtConfigCount || (three && !x)) std::abort();
+  // three parts: any rows, 64 a grid row; one (bf16 rows staged in abuf): 64 at most
+  if (rows < 1 || rows > (three ? kMtMostRows : 64) || cfg < 0 || cfg >= kMtConfigCount || (three && !x)) std::abort();
   MtGroups gs;
   gs.n = 1;
   gs.g[0] = MtOut{W, y, nullptr, N, ldy, 0, int(accumulate), 0};

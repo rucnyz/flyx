@@ -216,21 +216,17 @@ void dspine_block(flyx_seq* s, const DFlashBlock& b, int width, const Launch& L,
   }
   rmsnorm(s->dx + H, H, b.norm.w, b.norm.offset, b.norm.eps, s->dh, H, nr, H, st);
   draft_head_pick(head, s->dh, nr, K, s->cand, s->unary, s, L, s->draft_prob, s->draft_margin);
-  // The walk's GEMMs, up to (block - 1) topk rows: the round kernels 64 rows at a time, each row's inputs as three bf16
-  // parts (float32's precision: the scores' differences are a message's against another's; bf16 inputs moved them by
-  // 5e-4 of a score, more than a near tie), the weights read once a 64 rows.
+  // The walk's GEMMs, up to (block - 1) topk rows: a round's kernel, every 64 rows at once in one launch, each row's
+  // inputs as three bf16 parts (float32's precision: the scores' differences are a message's against another's; bf16
+  // inputs moved them by 5e-4 of a score, more than a near tie).
   Launch walk = L;
   walk.round_rows = true;
   walk.draft = false;
-  auto rows64 = [&](const float* x, int ldx, const Lin& w, int N, int K_, float* y, int ldy, int rows) {
-    for (int r0 = 0; r0 < rows; r0 += 64)
-      gemm(x + size_t(r0) * ldx, ldx, w, N, K_, y + size_t(r0) * ldy, ldy, std::min(64, rows - r0), false, walk);
-  };
   if (head.wb.data) embed_blocks(s->cand, head.wb, H, d.heads, nr * K, st);  // a packed head's rows as float32
   dspine_heads(s->cand, head.wb.data ? nullptr : head.w, b.norm.w, d.before, H, K, nr * K, d.heads, d.base, st);
-  rows64(d.heads, H, br.write_t, R, H, d.tg, R, nr * K);
+  gemm(d.heads, H, br.write_t, R, H, d.tg, R, nr * K, false, walk);
   dspine_senders(s->P, s->cand, br.codebook, C, senders, d.codes, st);
-  rows64(d.codes, C, br.pv, 2 * R, C, d.gates, 2 * R, senders);
+  gemm(d.codes, C, br.pv, 2 * R, C, d.gates, 2 * R, senders, false, walk);
   dspine_scores(d.g, d.gates, br.gate_bias, d.tg, d.base, d.rms, R, K, senders, d.pick, st);
   dspine_walk(s->P, s->cand, d.pick, K, std::min(width, nr), s->oracle, s->drafts, st);
 }

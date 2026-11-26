@@ -285,6 +285,8 @@ struct Bf16Config {
 };
 extern const Bf16Config kBf16Configs[];
 extern const int kSkinnyConfigs;
+// k_gemm_skinny_mt's rows in three parts (a round's, 64 a grid row): what gemm_skinny_mt_cfg takes at most.
+constexpr int kMtMostRows = 64 * 64;
 // 17..64 rows of bf16 weights in one launch (backends/cuda/variants/candidates.toml, bf16_mt): each span of weights
 // read once for every 16-row tile.  parts 3: every row the bits the 1..16-row kernel gives it (chunks 16; the kernel
 // splits the float32 rows x itself); parts 1: bf16 inputs (in abuf), deterministic, those of no other kernel, and
