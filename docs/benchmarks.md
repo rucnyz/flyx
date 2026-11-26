@@ -134,6 +134,7 @@ python bench/prompts/make_coding_prompt.py --flyx ./bin/flyx --model MODEL.gguf 
 | `tree_bench` | Speculative tree verification latency and acceptance: `tree_bench MODEL [--ctx-at P] [--widths 1,15,31,63] [--drafted T]` (every width timed from the same context; trees of up to 63 drafts where the backend lowers them). |
 | `flyx bench --prompts` | A prompt set (`{"question"}` or `{"messages"}` a line), every prompt's tokens and rounds in the `--json` record: `flyx bench MODEL --prompts FILE.jsonl [--suffix S] [--limit N] --json OUT.json`; `tests/e2e/check_dv.py` scores and compares such records. |
 | `bench/ab/paired_records.sh`, `bench/ab/summarize_records.py`, `bench/ab/same_runs.py` | Two builds' `flyx bench --prompts` runs in turns (waiting for a quiet GPU), their medians, and whether two runs give the same answers and rounds. |
+| `bench/ab/sglang_bench.py` | A `flyx bench --prompts` record's prompts, token for token, through an SGLang server: its decode tok/s as flyx counts it, its tokens a round, and how many answers are the record's (section 6). |
 | `bench/replay/dv_choice` | DV's per-round choice replayed on recorded rounds (`bench/replay/dv_traces/`), each constant set otherwise: `python -I bench/replay/dv_choice.py table BUILD/bin/dv_choice`. |
 | `bench/trace/dv_round_kernels.py` | Where a DV round's time goes, from an `nsys` trace of DV's rounds with graphs off. |
 | `bench/trace/` | CUPTI kernel timeline analysis (`gaps.py`, `layer_times.py`, `per_matrix.py`, `prefill_kinds.py`). |
@@ -198,13 +199,15 @@ done
 ## 6. Block Drafters on Qwen3.8-27B and Qwen3-8B: DSpine, DFlash2, MTP (RTX PRO 6000)
 
 One RTX PRO 6000 Blackwell Server Edition (96 GB, driver `620.70.06`), flyx at the DSpine change (Release, CUDA
-13.4, `FLYX_CUDA_ARCHS=120-real`), greedy, thinking off, up to 1024 new tokens a prompt, each prompt in a fresh session:
+13.4, `FLYX_CUDA_ARCHS=120-real`; Qwen3-8B with this GPU's table and DSpine's NVFP4 layer copies, below), greedy,
+thinking off, up to 1024 new tokens a prompt, each prompt in a fresh session:
 
 * **Qwen3.8-27B**: `QUASAR-QAT/Qwen3.8-27B-QUASAR-NVFP4` (`4a22293a`, its MTP layer kept), converted once with
   `z-lab/Qwen3.8-27B-DFlash2` (`50307d4c`, block 8) and once with `tencent/Qwen3.8-27B-DSpine-b16` (`260a6c23`).
 * **Qwen3-8B**: `Qwen/Qwen3-8B` (`b968826d`, BF16) with `tencent/Qwen3-8B-DSpine-b16` (`3b1e69d0`).
 * **Prompts**: `bench/prompts/eval_sets.py` (the first 30 of GSM8K, MATH-500, HumanEval, MBPP and MT-Bench's first
-  turns) and `bench/prompts/chat_short.jsonl` (24).
+  turns) and `bench/prompts/chat_short.jsonl` (24); on Qwen3-8B also GSM8K and MBPP with thinking on (the first 30,
+  `--think`, no opener: Qwen3's template writes none).
 
 ```sh
 PYTHONPATH=python/convert python -m flyx_convert --model Qwen3.8-27B-QUASAR-NVFP4 --draft Qwen3.8-27B-DSpine-b16 -o q27-dspine.flyx
@@ -229,21 +232,51 @@ configuration).
 | MT-Bench | 81.5 | 196.8 (3.14) | 228.2 (3.40) | 202.7 (3.02) | **228.5** (3.37) | 175.3 (3.15) |
 | chat | 81.6 | 218.1 (3.53) | **263.4** (3.94) | 237.0 (3.57) | 258.4 (3.81) | 205.6 (3.69) |
 
-| Qwen3-8B | plain | DSpine | DSpine, 15 drafts |
-|---|---:|---:|---:|
-| GSM8K | 87.6 | 623.5 (9.92) | 624.9 (10.03) |
-| MATH-500 | 87.5 | 531.8 (8.37) | 547.8 (8.68) |
-| HumanEval | 87.7 | 484.5 (7.66) | 491.2 (7.80) |
-| MBPP | 87.6 | 460.7 (7.25) | 474.8 (7.54) |
-| MT-Bench | 87.5 | 235.5 (3.51) | 229.3 (3.60) |
-| chat | 87.6 | 294.3 (4.50) | 294.7 (4.62) |
+| Qwen3-8B | plain | DSpine | DSpine, 15 drafts | Tencent's plugin (SGLang), 15 drafts |
+|---|---:|---:|---:|---:|
+| GSM8K | 87.5 | 664.7 (9.28) | **692.1** (9.92) | 659.2 (10.00) |
+| MATH-500 | 87.4 | 594.7 (8.32) | **614.5** (8.63) | 592.3 (8.81) |
+| HumanEval | 87.5 | 524.9 (7.26) | **555.0** (7.81) | 531.3 (7.85) |
+| MBPP | 87.4 | 517.2 (7.28) | **531.9** (7.50) | 513.5 (7.58) |
+| MT-Bench | 87.3 | **265.8** (3.51) | 258.5 (3.61) | 242.1 (3.58) |
+| chat | 87.4 | 331.3 (4.47) | **331.8** (4.62) | 306.1 (4.57) |
+| GSM8K, thinking | 87.3 | 307.6 (4.12) | **312.4** (4.34) | 294.5 (4.39) |
+| MBPP, thinking | 87.3 | **272.2** (3.58) | 269.1 (3.73) | 248.5 (3.76) |
+
+**Against Tencent's own implementation.** Their SGLang plugin (`Tencent/DSpine` at `d037a9b`, `sglang-dspine` 0.2.0
+on SGLang 0.5.22, torch 2.14.1, flashinfer-python 0.7.1) on the same GPU, model and drafter snapshots, the same
+prompts token for token (each flyx plain record's `prompt_ids`), greedy, one request at a time, its README's Qwen3-8B
+server but for the attention backends (FlashAttention 3 does not run on sm_120):
+
+```sh
+sglang serve --model-path Qwen/Qwen3-8B --speculative-algorithm DSPINE \
+  --speculative-draft-model-path tencent/Qwen3-8B-DSpine-b16 --speculative-num-draft-tokens 16 --dtype bfloat16 \
+  --attention-backend flashinfer --speculative-draft-attention-backend triton --page-size 1 \
+  --mem-fraction-static 0.65 --context-length 8192 --max-running-requests 8 --cuda-graph-bs-decode 1 2 4 8
+python -I bench/ab/sglang_bench.py plain_gsm8k.json --json sglang_gsm8k.json   # flyx bench --no-spec's record
+```
+
+flyx is 3.6-9.8% faster on every set, at about the same tokens a round: its round is shorter.  Every flyx answer is
+plain decoding's; SGLang's speculative answers were its own plain decoding's in 8 of the 30 GSM8K prompts
+(`--same-as` a run of the server without `--speculative-*`).  What made the difference on this GPU, measured on
+GSM8K and HumanEval at 15 drafts (617.6 / 490.8 tok/s before):
+
+* **This GPU's table** (`backends/cuda/variants/sm120/tables/rtxpro6000.toml`, `cuda_bench tune gemm` on the four
+  bf16 GEMMs Qwen3-8B runs): the attention out and mlp down projections at 9..16 rows read 1052 and 953 GB/s on the
+  RTX 5090's rules, 1255 and 1008 on their own (+2-4%; bit-identical configurations).
+* **DSpine's layer copies**: beside a BF16 target the drafter was bf16, its five layers 1.9 GB a round, as large as
+  the target's; Q8_0 copies +6% at the same tokens a round, NVFP4 copies 2-3% more at most 1% fewer.
+* **The walk's GEMMs** in one launch of up to 240 rows (+0.5%).
+
+The trace that found them (`CUDA_INJECTION64_PATH=.../libflyx-trace.so FLYX_TRACE=round.tsv flyx bench ...`, then
+`python -I bench/trace/gaps.py round.tsv`), before them: a round 15.35 ms, its graph busy 15.2 ms of it, the GEMMs 13.3.
 
 * A round costs DSpine what it costs DFlash2 at each width (the engine's load-time timings on the 27B: 14.02 / 14.87
   / 18.01 ms for 3 / 7 / 15 drafts against 14.14 / 14.90 / 17.73), and DSpine's NVFP4 layer copies beside the NVFP4
   target accept as its exact weights do (GSM8K at 15 drafts: 7.51 against 7.49 tokens a round).
 * DSpine at its block of 16 accepts more than DFlash2 at its block of 8, as its authors report (GSM8K: 7.51 against
   6.20 tokens a round; with thinking on, `think/gsm8k_think.jsonl` above: 6.93 against 5.60, 378.5 against
-  376.6 tok/s), and on Qwen3-8B as they report (GSM8K at 15 drafts: 10.03; theirs 10.55).  Its first drafts are accepted less often than DFlash2's on
+  376.6 tok/s), and on Qwen3-8B as they report (GSM8K at 15 drafts: 10.03 from its exact weights, 9.92 from its NVFP4 copies; theirs 10.55).  Its first drafts are accepted less often than DFlash2's on
   the 27B (the first: 0.912 against 0.948; seven deep: 0.419 against 0.567), and flyx's DFlash2 also drafts 15 from
   a wider block (GSM8K, `--width 15 --no-lookup`: 8.26 tokens a round, 455.2 tok/s): the faster of the two depends on
   the text, DSpine on code (HumanEval, MBPP), DFlash2 on math and chat.
