@@ -482,33 +482,35 @@ void quantize_mtp_weights(flyx_bmodel* m) {
                  double(int64_t(m->bytes) - int64_t(before)) / 1e9);
 }
 
-// Shared block-drafter weight policy (DFlash2, DFlash and DSpine): quantize BF16 projections to NVFP4 beside an
-// NVFP4 target (drafted against a BF16 target NVFP4 lost 9% acceptance, -2.6% overall; NVFP4 target +9.6%), else to
-// Q8_0: beside GGML block weights (the 27B's drafter reads 3.3 GB of bf16 a round) and beside a BF16 target (Qwen3-8B's
-// DSpine reads 1.9 GB of bf16 a round, half that in Q8_0, at the same tokens a round), leaving already-quantized block
-// drafters intact.  draft_weights=exact keeps them as the file has them.
+// Shared block-drafter weight policy (DFlash2, DFlash and DSpine), leaving already-quantized block drafters intact
+// (draft_weights=exact keeps them as the file has them): BF16 projections to NVFP4 beside an NVFP4 target (drafted
+// against a BF16 target NVFP4 lost 9% acceptance, -2.6% overall; NVFP4 target +9.6%), to Q8_0 beside GGML block weights
+// (the 27B's drafter reads 3.3 GB of bf16 a round), and beside a BF16 target to Q8_0, DSpine's to NVFP4.  Qwen3-8B's
+// DSpine read 1.9 GB of bf16 a round, its layers as large as the target's: Q8_0 kept its tokens a round, NVFP4 cost at
+// most 1% of them (its walk re-scores the head's top 16 through its bf16 bridge) and made a round 2-3% faster than
+// Q8_0's on the eight prompt sets of docs/benchmarks.md section 6.
 void quantize_block_drafter_weights(flyx_bmodel* m, TargetQuant tq) {
+  if (m->dflash_block < 0) return;
+  auto& d = block<DFlashBlock>(m, m->dflash_block);
+  const bool fp4 = tq == TargetQuant::kNvfp4 || (tq == TargetQuant::kFloat && d.dspine);
   auto copy = [&](Lin& l, int N, int K) {
-    if (tq == TargetQuant::kNvfp4) quantize_in_place(m, l, N, K);
+    if (fp4) quantize_in_place(m, l, N, K);
     else q8_in_place(m, l, N, K);
   };
-  if (m->dflash_block >= 0) {
-    auto& d = block<DFlashBlock>(m, m->dflash_block);
-    // DSpine: no convs or selector (their Lins empty: no copy); its bridge stays bf16 (blocks.h DSpineBridge).
-    const int H = d.hidden, TG = d.conv_cols(), nqkv = (d.nh + 2 * d.nkv) * d.hd;
-    for (int j = 0; j < d.layers(); ++j) {
-      auto& l = block<DFlashLayer>(m, d.first_layer + j);
-      copy(l.attn_proj, 2 * TG, H);
-      copy(l.w_qkv, nqkv, H);
-      copy(l.w_o, H, d.nh * d.hd);
-      copy(l.mlp_proj, 2 * TG, H);
-      copy(l.w_gu, 2 * d.inter, H);
-      copy(l.w_down, H, d.inter);
-    }
-    copy(d.fc, H, d.n_taps * d.target_hidden);
-    copy(d.ctx, d.ctx_width(), H);
-    copy(d.sel_hid, d.sel_rank, H);
+  // DSpine: no convs or selector (their Lins empty: no copy); its bridge stays bf16 (blocks.h DSpineBridge).
+  const int H = d.hidden, TG = d.conv_cols(), nqkv = (d.nh + 2 * d.nkv) * d.hd;
+  for (int j = 0; j < d.layers(); ++j) {
+    auto& l = block<DFlashLayer>(m, d.first_layer + j);
+    copy(l.attn_proj, 2 * TG, H);
+    copy(l.w_qkv, nqkv, H);
+    copy(l.w_o, H, d.nh * d.hd);
+    copy(l.mlp_proj, 2 * TG, H);
+    copy(l.w_gu, 2 * d.inter, H);
+    copy(l.w_down, H, d.inter);
   }
+  copy(d.fc, H, d.n_taps * d.target_hidden);
+  copy(d.ctx, d.ctx_width(), H);
+  copy(d.sel_hid, d.sel_rank, H);
 }
 
 }  // namespace
