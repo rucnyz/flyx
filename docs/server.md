@@ -169,7 +169,7 @@ Passed verbatim to the backend (`backends/cuda/backend.cpp`). Unknown keys or in
 | `head_cert` | `0` \| `1` | `1` | Certified FP8-filtered exact greedy head (bit-identical greedy tokens; `0` saves ~0.64 GB on 4B). |
 | `head_fp8` | `0` \| `1` | `0` | Lossy FP8 output head (trades accuracy for decode speed). |
 | `draft_head` | `pick` \| `full` | `pick` | Draft candidate scoring: 1-bit top-256 prefilter + exact score (`pick`) vs full NVFP4 head (`full`). |
-| `draft_weights` | `nvfp4` \| `exact` | `nvfp4` | Quantized (`nvfp4`/Q8_0) vs exact bf16 drafter weights. |
+| `draft_weights` | `nvfp4` \| `exact` | `nvfp4` | Drafter weights quantized (NVFP4 beside an NVFP4 target, else Q8_0) vs as the file has them (`exact`). |
 | `draft_kv` | `fp8` \| `16` | `fp8` | MTP drafter KV cache dtype when target KV is FP8. |
 | `act_group` | `32` \| `64` \| `128` \| `256` | `32` | Measurement only: 8-bit activation scale group size (use with `fusion=0,round_glu=0`). |
 | `act_fp4` | `0` \| `1` \| `2` | `0` | Measurement only: round staged activations as NVFP4 (`1`) or MXFP8 (`2`). |

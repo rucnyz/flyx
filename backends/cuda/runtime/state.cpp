@@ -36,7 +36,11 @@ RowNeeds row_needs(const flyx_bmodel* m) {
     } else if (std::holds_alternative<MtpBlock>(blk)) {
       n.mtp = true;
       ks({2 * m->hidden});
+    } else if (const auto* l = std::get_if<DFlashLayer>(&blk)) {
+      // a block drafter's layers copied to Q8_0 beside a BF16 target (weights.cpp), whose file has no 8-bit inputs
+      n.q8 = n.q8 || l->w_qkv.q8_inputs() || l->w_o.q8_inputs() || l->w_gu.q8_inputs() || l->w_down.q8_inputs();
     } else if (const auto* d = std::get_if<DFlashBlock>(&blk)) {
+      n.q8 = n.q8 || d->fc.q8_inputs() || d->ctx.q8_inputs();
       n.feats = d->n_taps * d->target_hidden;
       n.cx = d->hidden;
       n.ckv = d->ctx_width();

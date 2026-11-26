@@ -482,12 +482,12 @@ void quantize_mtp_weights(flyx_bmodel* m) {
                  double(int64_t(m->bytes) - int64_t(before)) / 1e9);
 }
 
-// Shared block-drafter weight policy (DFlash2 and future parallel block drafters): quantize BF16 projections to
-// NVFP4 beside an NVFP4 target (drafted against a BF16 target NVFP4 lost 9% acceptance, -2.6% overall; NVFP4 target
-// +9.6%) or Q8_0 beside GGML block weights (the 27B's drafter reads 3.3 GB of bf16 a round), leaving already-quantized
-// block drafters intact.
+// Shared block-drafter weight policy (DFlash2, DFlash and DSpine): quantize BF16 projections to NVFP4 beside an
+// NVFP4 target (drafted against a BF16 target NVFP4 lost 9% acceptance, -2.6% overall; NVFP4 target +9.6%), else to
+// Q8_0: beside GGML block weights (the 27B's drafter reads 3.3 GB of bf16 a round) and beside a BF16 target (Qwen3-8B's
+// DSpine reads 1.9 GB of bf16 a round, half that in Q8_0, at the same tokens a round), leaving already-quantized block
+// drafters intact.  draft_weights=exact keeps them as the file has them.
 void quantize_block_drafter_weights(flyx_bmodel* m, TargetQuant tq) {
-  if (tq == TargetQuant::kFloat) return;
   auto copy = [&](Lin& l, int N, int K) {
     if (tq == TargetQuant::kNvfp4) quantize_in_place(m, l, N, K);
     else q8_in_place(m, l, N, K);
