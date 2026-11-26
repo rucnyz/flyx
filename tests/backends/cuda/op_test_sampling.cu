@@ -489,6 +489,21 @@ void test_select() {
     const bool same = down_i(i1, rows * k2) == down_i(i2, rows * k2) && down(v1, rows * k2) == down(v2, rows * k2);
     std::printf("  %-4s top-k over slices: one block a row's result\n", same ? "ok" : "FAIL");
     g_fail += !same;
+    // A row with no finite score (a drafter's NaN rows): valid ids, 0..k-1, from both kernels (argmax_rows gives 0).
+    Vec nan_rows(size_t(rows) * V2, std::nan(""));
+    float* dn = up(nan_rows);
+    int *n1 = dev<int>(rows * k2), *n2 = dev<int>(rows * k2), *npi = dev<int>(rows * kTopkParts * 16);
+    float *nv1 = dev<float>(rows * k2), *nv2 = dev<float>(rows * k2), *npv = dev<float>(rows * kTopkParts * 16);
+    topk_rows(dn, V2, V2, k2, n1, nv1, rows, 0);
+    topk_rows(dn, V2, V2, k2, n2, nv2, rows, 0, npv, npi, rows);
+    bool valid = true;
+    for (auto* ids : {&n1, &n2}) {
+      const auto got_ids = down_i(*ids, rows * k2);
+      for (int j = 0; j < rows * k2; ++j) valid &= got_ids[size_t(j)] == j % k2;
+    }
+    std::printf("  %-4s top-k of a row without a finite score: ids 0..k-1, both kernels\n", valid ? "ok" : "FAIL");
+    g_fail += !valid;
+    for (void* p : std::initializer_list<void*>{dn, n1, n2, npi, nv1, nv2, npv}) CK(cudaFree(p));
     // topk_rows confidence outputs (prob & margin) for full-head drafters (both k=1/val=null merge and small-V exact).
     int* i_one = dev<int>(rows);
     float *dp = dev<float>(rows), *dm = dev<float>(rows);

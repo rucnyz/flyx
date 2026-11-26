@@ -228,6 +228,7 @@ void test_attention(int hd, int rot, int nh, int nkv, int rows, int ctx, bool ca
                     bool qk_norm = true);
 void test_attention_fp8(int hd, int rot, int nh, int nkv, int rows, int ctx, double theta, bool qk_norm = true);
 void test_attention_tree(int hd, int nh, int nkv, int ctx);
+void test_kv16_saturation();
 void test_strata(int hd, int nh, int nkv, int rows, int ctx, int bits, bool fp8);
 void test_pageable_kv_ops();
 void test_quantize_nvfp4();

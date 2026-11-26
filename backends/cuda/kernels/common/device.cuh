@@ -17,6 +17,13 @@ namespace flyx::cuda {
 // Most candidates a row has (topk_rows, the DFlash2 selector).
 constexpr int kTopMax = 16;
 
+// A binary16 K/V cache's value (ops/dtype/ref.h round_kv16): round to nearest, saturating at the largest finite
+// 65504.  A value past it would be an infinity, and one infinity in a cache makes every row that attends to it NaN
+// (a drafter's block attends both ways: all of its rows).  NaN stays NaN.
+__device__ __forceinline__ __half kv16_of(float x) {
+  return __float2half_rn(x > 65504.f ? 65504.f : x < -65504.f ? -65504.f : x);
+}
+
 __device__ __forceinline__ float warp_sum(float v) {
 #pragma unroll
   for (int o = 16; o > 0; o >>= 1) v += __shfl_xor_sync(0xffffffffu, v, o);

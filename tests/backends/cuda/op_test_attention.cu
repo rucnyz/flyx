@@ -103,6 +103,71 @@ void expect_windows(const std::string& what, const float* dq, const T* dK, const
   for (void* x : std::initializer_list<void*>{state, dw, sk, sv, scale_buf}) CK(cudaFree(x));
 }
 
+// A binary16 K/V cache holds 65504 for what is past it (kv16_of, ops/dtype/ref.h round_kv16), not an infinity:
+// attn_prep's k and v (no q/k norms: k rotated as projected) and draft_ctx_kv's v, each entry the reference's, and
+// attention over such a cache stays finite (with an infinity in it, every row attending to it was NaN).
+void test_kv16_saturation() {
+  std::printf("binary16 K/V caches saturate\n");
+  seed("kv16 saturation");
+  const int hd = 64, rot = 64, nh = 2, nkv = 1, rows = 4, ctx = 3, cap = ctx + rows + 16;
+  const double theta = 1e4;
+  const int ld = 2 * nh * hd + 2 * nkv * hd, k_off = 2 * nh * hd, v_off = k_off + nkv * hd;
+  Vec qkv = randv(size_t(rows) * ld);
+  qkv[size_t(1) * ld + v_off + 3] = 1e5;
+  qkv[size_t(1) * ld + v_off + 7] = -3e6;
+  qkv[size_t(2) * ld + k_off + 5] = 2e5;
+  const Vec zeros(size_t(cap) * nkv * hd, 0.0);
+  float *dqkv = up(qkv), *dq = dev<float>(size_t(rows) * nh * hd), *dout = dev<float>(size_t(rows) * nh * hd);
+  kv16 *dK = up_f16(zeros), *dV = up_f16(zeros);
+  DevParams* P = params(ctx);
+  attn_prep(dqkv, ld, 0, k_off, v_off, nullptr, nullptr, 1.0f, 1e-6f, theta, rot, nh, nkv, hd, rows, P, kPosPosition,
+            false, dq, dK, dV, 0);
+  Vec Kr = zeros, Vr = zeros;
+  for (int r = 0; r < rows; ++r) {
+    Vec k(hd);
+    ops::prep_head(&qkv[size_t(r) * ld + k_off], nullptr, hd, 1e-6, 1.0, ctx + r, theta, rot, k.data());
+    for (int d = 0; d < hd; ++d) {
+      Kr[size_t(ctx + r) * hd + d] = ops::round_kv16(k[d]);
+      Vr[size_t(ctx + r) * hd + d] = ops::round_kv16(qkv[size_t(r) * ld + v_off + d]);
+    }
+  }
+  const Vec Kg = down_f16(dK, zeros.size()), Vg = down_f16(dV, zeros.size());
+  bool finite = true, saturated = true;
+  for (size_t i = 0; i < Kg.size(); ++i) {
+    finite &= std::isfinite(Kg[i]) && std::isfinite(Vg[i]);
+    if (std::fabs(Kr[i]) == 65504.0) saturated &= Kg[i] == Kr[i];
+    if (std::fabs(Vr[i]) == 65504.0) saturated &= Vg[i] == Vr[i];
+  }
+  saturated &= Vg[size_t(ctx + 1) * hd + 3] == 65504.0 && Vg[size_t(ctx + 1) * hd + 7] == -65504.0;
+  std::printf("  %-4s attn_prep: every cache entry finite, the ones past 65504 at +-65504\n",
+              finite && saturated ? "ok" : "FAIL");
+  g_fail += !(finite && saturated);
+  expect("attn_prep V cache, saturating", Vg, Vr, 2e-3);
+  expect("attn_prep K cache, saturating", Kg, Kr, 2e-3);
+  const int splits = 2;
+  float* part = dev<float>(attention_partial_floats(rows, nh, hd, splits));
+  attention_split(dq, dK, dV, nh, nkv, hd, rows, false, rows, float(1.0 / std::sqrt(hd)), P, nullptr, 0, dout, nh * hd,
+                  part, splits, TL, 0, 0);
+  bool out_finite = true;
+  for (double x : down(dout, size_t(rows) * nh * hd)) out_finite &= std::isfinite(x);
+  std::printf("  %-4s attention over the saturated cache: finite\n", out_finite ? "ok" : "FAIL");
+  g_fail += !out_finite;
+  // draft_ctx_kv: a drafter's context row [layer][k | v], its v past the range
+  Vec ckv = randv(size_t(2) * nkv * hd), kn = randv(hd, 0.2);
+  ckv[size_t(nkv) * hd + 11] = -7e4;
+  float *dckv = up(ckv), *dkn = up(kn);
+  kv16 *cK = up_f16(zeros), *cV = up_f16(zeros);
+  draft_ctx_kv(dckv, 2 * nkv * hd, dkn, 1e-6f, theta, 1, nkv, hd, 1, P, kPosPosition, false, cK, cV,
+               size_t(cap) * nkv * hd, 0);
+  const Vec cVg = down_f16(cV, zeros.size());
+  bool ctx_ok = true;
+  for (double x : cVg) ctx_ok &= std::isfinite(x);
+  ctx_ok &= cVg[size_t(ctx) * hd + 11] == -65504.0;
+  std::printf("  %-4s draft_ctx_kv: v past -65504 at -65504\n", ctx_ok ? "ok" : "FAIL");
+  g_fail += !ctx_ok;
+  for (void* p : std::initializer_list<void*>{dqkv, dq, dout, dK, dV, part, dckv, dkn, cK, cV}) CK(cudaFree(p));
+}
+
 void test_attention(int hd, int rot, int nh, int nkv, int rows, int ctx, bool causal, double theta, int window,
                     bool qk_norm) {
   // the inputs of the cases with norms as before the switch
