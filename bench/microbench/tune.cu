@@ -1124,6 +1124,10 @@ int tune(int argc, char** argv) {
   std::printf("sku = \"%s\"\ndevices = [\"%s\"]\n", sku.c_str(), p.name);
   std::fflush(stdout);
 
+  if (!shapes.empty() && !want("gemm")) {
+    std::fprintf(stderr, "cuda_bench tune: NxK shapes are the gemm family's: name gemm among the families\n");
+    return 2;
+  }
   if (want("flash_gqa")) tune_flash_gqa();
   std::vector<std::vector<std::array<double, 4>>> gemm_ms;
   if (want("gemm") && !shapes.empty()) {

@@ -57,10 +57,11 @@ bool supported(const flyx_bmodel* m, const Block& blk, std::string* why) {
     if (!attention_head_dim(d->hd) || d->sel_topk > 16 || d->block < 2 || d->block > FLYX_MAX_ROWS ||
         (!d->dspine && (d->conv_group < 1 || d->hidden % d->conv_group)) || d->nkv < 1 || d->nh % d->nkv)
       return no("drafter dimensions outside what the CUDA kernels support");
-    // DSpine's GEMMs take K % 8 (gemm()); its walk's scores one warp a candidate
-    if (d->dspine && (d->dspine.code % 8 || d->dspine.rank % 8 || d->dspine.topk < 2 || d->dspine.topk > 16 ||
-                      d->hidden % 8))
-      return no("DSpine dimensions outside what the CUDA kernels support (code and rank multiples of 8)");
+    // DSpine's GEMMs take K % 8 (gemm()); its walk's scores one warp a candidate, a sender's message in shared memory
+    if (d->dspine && (d->dspine.code % 8 || d->dspine.rank % 8 || d->dspine.rank > 12288 || d->dspine.topk < 2 ||
+                      d->dspine.topk > FLYX_DSPINE_MAX_TOPK || d->hidden % 8))
+      return no("DSpine dimensions outside what the CUDA kernels support (code and rank multiples of 8, rank up to "
+                "12288)");
     if (d->hidden != m->hidden || d->target_hidden != m->hidden) return no("drafter hidden size differs from the target's");
   } else if (const auto* v = std::get_if<DvBlock>(&blk)) {
     if (v->hidden != m->hidden || v->topk != 16 || v->res_k != 16)  // a slot's 16 candidates (DV's kernels: kDvTop)

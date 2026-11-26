@@ -91,7 +91,7 @@ inline void destroy_side(SideStream& s) {
 //   wait=spin|poll|auto   wait for the device by spinning (lowest latency, one core busy), by polling with short sleeps
 //                         (the default on Linux), or (auto, the default on Windows) spinning while the last waits for a
 //                         round's result took under 1.5 ms (a sleep ends ~0.5 ms late), polling past that (runner.cpp)
-//   draft_weights=exact   drafts read the bf16 head, MTP layer and DFlash2 drafter, not NVFP4 or Q8_0 copies
+//   draft_weights=exact   drafts read the bf16 head, MTP layer and block drafter, not NVFP4 or Q8_0 copies
 //   draft_kv=16           the MTP layer's K/V cache in binary16, not FP8 with the target's (when they are FP8)
 //   blocks=bf16           GGML block weights (GGUF) decoded to bf16 at load instead of kept packed
 //   embed=gpu an embedding table no head reads on the GPU, not in host memory

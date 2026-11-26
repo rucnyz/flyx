@@ -103,7 +103,7 @@ void expect_windows(const std::string& what, const float* dq, const T* dK, const
   for (void* x : std::initializer_list<void*>{state, dw, sk, sv, scale_buf}) CK(cudaFree(x));
 }
 
-// A binary16 K/V cache holds 65504 for what is past it (kv16_of, ops/dtype/ref.h round_kv16), not an infinity:
+// A binary16 K/V cache holds 65504 for what is past it, an infinity included (kv16_of, ops/dtype/ref.h round_kv16):
 // attn_prep's k and v (no q/k norms: k rotated as projected) and draft_ctx_kv's v, each entry the reference's, and
 // attention over such a cache stays finite (with an infinity in it, every row attending to it was NaN).
 void test_kv16_saturation() {
@@ -116,6 +116,8 @@ void test_kv16_saturation() {
   qkv[size_t(1) * ld + v_off + 3] = 1e5;
   qkv[size_t(1) * ld + v_off + 7] = -3e6;
   qkv[size_t(2) * ld + k_off + 5] = 2e5;
+  qkv[size_t(3) * ld + v_off + 1] = INFINITY;
+  qkv[size_t(3) * ld + v_off + 2] = -INFINITY;
   const Vec zeros(size_t(cap) * nkv * hd, 0.0);
   float *dqkv = up(qkv), *dq = dev<float>(size_t(rows) * nh * hd), *dout = dev<float>(size_t(rows) * nh * hd);
   kv16 *dK = up_f16(zeros), *dV = up_f16(zeros);
@@ -139,7 +141,8 @@ void test_kv16_saturation() {
     if (std::fabs(Vr[i]) == 65504.0) saturated &= Vg[i] == Vr[i];
   }
   saturated &= Vg[size_t(ctx + 1) * hd + 3] == 65504.0 && Vg[size_t(ctx + 1) * hd + 7] == -65504.0;
-  std::printf("  %-4s attn_prep: every cache entry finite, the ones past 65504 at +-65504\n",
+  saturated &= Vg[size_t(ctx + 3) * hd + 1] == 65504.0 && Vg[size_t(ctx + 3) * hd + 2] == -65504.0;
+  std::printf("  %-4s attn_prep: every cache entry finite, the ones past 65504 (infinities too) at +-65504\n",
               finite && saturated ? "ok" : "FAIL");
   g_fail += !(finite && saturated);
   expect("attn_prep V cache, saturating", Vg, Vr, 2e-3);

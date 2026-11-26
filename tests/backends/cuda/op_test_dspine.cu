@@ -138,16 +138,26 @@ void test_dspine_walk(int H, int C, int R, int k, int n) {
   float *dcodes = dev<float>(size_t(senders) * C), *dsv = dev<float>(size_t(senders) * 2 * R);
   int *dpick = dev<int>(size_t(senders)), *ddrafts = dev<int>(size_t(n));
   DevParams* P = anchored(anchor);
-  Launch walk = TL;  // as dspine_block: the round kernels 64 rows at a time
+  Launch walk = TL;  // as dspine_block: a round's kernel, every row in one launch
   walk.round_rows = true;
-  auto rows64 = [&](const float* x, int ldx, const bf16* w, int N, int K, float* y, int ldy, int rows) {
-    for (int r0 = 0; r0 < rows; r0 += 64)
-      gemm(x + size_t(r0) * ldx, ldx, w, N, K, y + size_t(r0) * ldy, ldy, std::min(64, rows - r0), false, walk);
-  };
   dspine_heads(dcand, dW, dnw, dbefore, H, k, n * k, dheads, dbase, 0);
-  rows64(dheads, H, b.d_write_t, R, H, dtg, R, n * k);
+  {  // a packed head (W null): the rows given as float32 (embed_blocks') in heads, the same bits
+    std::vector<float> rows(size_t(n) * k * H);
+    for (int i = 0; i < n * k; ++i)
+      for (int h = 0; h < H; ++h) rows[size_t(i) * H + h] = float(W[size_t(cand[size_t(i)]) * H + h]);
+    float *dheads2 = dev<float>(rows.size()), *dbase2 = dev<float>(size_t(n) * k);
+    CK(cudaMemcpy(dheads2, rows.data(), rows.size() * 4, cudaMemcpyHostToDevice));
+    dspine_heads(dcand, nullptr, dnw, dbefore, H, k, n * k, dheads2, dbase2, 0);
+    const bool same = down(dheads2, rows.size()) == down(dheads, rows.size()) &&
+                      down(dbase2, size_t(n) * k) == down(dbase, size_t(n) * k);
+    std::printf("  %-4s %-48s\n", same ? "ok" : "FAIL", "a packed head's rows (W null): the same bits");
+    g_fail += !same;
+    CK(cudaFree(dheads2));
+    CK(cudaFree(dbase2));
+  }
+  gemm(dheads, H, b.d_write_t, R, H, dtg, R, n * k, false, walk);
   dspine_senders(P, dcand, b.d_codebook, C, senders, dcodes, 0);
-  rows64(dcodes, C, b.d_packed + size_t(R) * C, 2 * R, C, dsv, 2 * R, senders);
+  gemm(dcodes, C, b.d_packed + size_t(R) * C, 2 * R, C, dsv, 2 * R, senders, false, walk);
   dspine_scores(dg, dsv, b.d_bias, dtg, dbase, drms, R, k, senders, dpick, 0);
   dspine_walk(P, dcand, dpick, k, n, nullptr, ddrafts, 0);
   // base scores: <before_{t+1}, head * nw>

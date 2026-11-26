@@ -18,6 +18,7 @@
 // each candidate's head row through write), every sender at once.
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <vector>

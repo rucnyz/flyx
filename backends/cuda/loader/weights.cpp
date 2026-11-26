@@ -131,9 +131,10 @@ uint16_t float_to_bf16(float f) {
 // * Draft logits (each MTP step, the DFlash2 block) read the whole head, ~2 ms
 //   in bf16 for Qwen3.5's 248K x 2560: an NVFP4 copy (the target keeps its own).
 // * The MTP layer (projections and fc, bf16 in the checkpoints) runs only for
-//   drafts and their context: quantized in place, the bf16 freed; the DFlash2
-//   drafter too, in NVFP4 beside an NVFP4 target and in Q8_0 (8-bit inputs,
-//   the block kernels) beside GGML block weights.
+//   drafts and their context: quantized in place, the bf16 freed; a block
+//   drafter too (quantize_block_drafter_weights): in NVFP4 beside an NVFP4
+//   target, in Q8_0 (8-bit inputs, the block kernels) beside GGML block
+//   weights or a BF16 target, DSpine's in NVFP4 there.
 // Option draft_weights=exact keeps them exact.
 void rows_to_bf16(const float* x, int ldx, int rows, int K, bf16* out, cudaStream_t st);
 
@@ -214,8 +215,8 @@ void quantize_packed_in_place(flyx_bmodel* m, Lin& l, int N, int K) {
   l.rs = rs;
 }
 
-// A bf16 matrix as Q8_0 blocks whose inputs are 8 bits (FLYX_ACT_Q8), the bf16 freed: the DFlash2 drafter's
-// projections beside a target of GGML block weights (half their bytes a round).
+// A bf16 matrix as Q8_0 blocks whose inputs are 8 bits (FLYX_ACT_Q8), the bf16 freed: a block drafter's projections
+// beside a target of GGML block weights or a BF16 one (half their bytes a round).
 void q8_in_place(flyx_bmodel* m, Lin& l, int N, int K) {
   if (l.packed() || l.q || !l.w || K % 32 != 0) return;
   const size_t blocks = size_t(N) * (K / 32);
@@ -482,7 +483,7 @@ void quantize_mtp_weights(flyx_bmodel* m) {
                  double(int64_t(m->bytes) - int64_t(before)) / 1e9);
 }
 
-// Shared block-drafter weight policy (DFlash2, DFlash and DSpine), leaving already-quantized block drafters intact
+// Shared block-drafter weight policy (DFlash2 and DSpine), leaving already-quantized block drafters intact
 // (draft_weights=exact keeps them as the file has them): BF16 projections to NVFP4 beside an NVFP4 target (drafted
 // against a BF16 target NVFP4 lost 9% acceptance, -2.6% overall; NVFP4 target +9.6%), to Q8_0 beside GGML block weights
 // (the 27B's drafter reads 3.3 GB of bf16 a round), and beside a BF16 target to Q8_0, DSpine's to NVFP4.  Qwen3-8B's

@@ -361,6 +361,8 @@ DFlashBlock dspine(WeightLoader& L, const flyx_model_desc& d, const flyx_dspine_
   f.fc = Lin{L.mat(b.fc)};
   f.hidden_norm = norm(L, b.hidden_norm);
   f.norm = norm(L, b.norm);
+  // the walk scales the candidates' head rows by the final norm's weight alone (k_dspine_heads)
+  expect(f.norm.offset == 0.f, "a DSpine final norm with an offset");
   std::vector<int> ctx, kn;
   double eps = 0;
   for (int j = 0; j < b.layers; ++j) {
