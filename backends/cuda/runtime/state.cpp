@@ -1122,8 +1122,7 @@ void build_seq(flyx_bmodel* m, int32_t max_ctx, flyx_seq* s) {
     s->ci = s->alloc<int>(size_t(head_rows) * V);
   }
   if (d) {
-    // a wide block's rows; no convs (DSpine): G 0
-    const int B = std::max(d->block, FLYX_MAX_ROWS), DH = d->hidden, G = d->conv_group ? DH / d->conv_group : 0;
+    const int B = std::max(d->block, FLYX_MAX_ROWS), DH = d->hidden;  // a wide block's rows
     s->ld_feats = n.feats;
     s->dtok = s->alloc<int>(B);
     s->cand = s->alloc<int>(size_t(B) * d->sel_topk);
@@ -1137,7 +1136,7 @@ void build_seq(flyx_bmodel* m, int32_t max_ctx, flyx_seq* s) {
     s->ld_dact = std::max(d->nh * d->hd, d->inter);
     s->dproj = s->alloc<float>(size_t(B) * s->ld_dproj);
     s->dact = s->alloc<float>(size_t(B) * s->ld_dact);
-    s->ddelta = s->alloc<float>(size_t(B) * 2 * d->conv_taps * G);
+    s->ddelta = s->alloc<float>(size_t(B) * 2 * d->conv_cols());
     s->dq = s->alloc<float>(size_t(B) * d->nh * d->hd);
     s->ld_ckv = n.ckv;
     if (const DSpineBridge& br = d->dspine) {
@@ -1226,7 +1225,7 @@ void alloc_batch(flyx_bmodel* m) {
       break;
     }
   if (d && !d->dspine && d->block > 0 && d->block * 2 <= FLYX_MAX_ROWS) {  // DSpine drafts a sequence at a time
-    const int DH = d->hidden, G = DH / d->conv_group;
+    const int DH = d->hidden;
     auto af = [&](size_t count) { return static_cast<float*>(alloc(count * sizeof(float))); };
     B->dflash.dtok = static_cast<int*>(alloc(size_t(FLYX_MAX_ROWS) * sizeof(int)));
     B->dflash.dx = af(size_t(FLYX_MAX_ROWS) * DH);
@@ -1237,7 +1236,7 @@ void alloc_batch(flyx_bmodel* m) {
     B->dflash.ld_dact = std::max(d->nh * d->hd, d->inter);
     B->dflash.dproj = af(size_t(FLYX_MAX_ROWS) * B->dflash.ld_dproj);
     B->dflash.dact = af(size_t(FLYX_MAX_ROWS) * B->dflash.ld_dact);
-    B->dflash.ddelta = af(size_t(FLYX_MAX_ROWS) * 2 * d->conv_taps * G);
+    B->dflash.ddelta = af(size_t(FLYX_MAX_ROWS) * 2 * d->conv_cols());
     B->dflash.dq = af(size_t(FLYX_MAX_ROWS) * d->nh * d->hd);
     B->dflash.cand = static_cast<int*>(alloc(size_t(FLYX_MAX_ROWS) * d->sel_topk * sizeof(int)));
     B->dflash.unary = af(size_t(FLYX_MAX_ROWS) * d->sel_topk);

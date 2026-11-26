@@ -8,6 +8,7 @@
 #include <string>
 #include <string_view>
 
+#include "models/drafters/trunk.h"
 #include "models/gguf.h"
 
 namespace flyx::models::drafters {
@@ -241,8 +242,7 @@ int build_dflash2(Tables& T, const DFlash2Spec& spec, const TargetSpec& target) 
   flyx_dflash2_block d = spec.block;
   const int layers = spec.layers;
   const double eps = spec.eps;
-  const int H = d.hidden, q = d.n_heads * d.head_dim, kv = d.n_kv * d.head_dim, I = d.inter;
-  const int TG2 = spec.tg2;
+  const int H = d.hidden, TG2 = spec.tg2;
   // The file's name for a drafter tensor ("draft.fc"): in the model file, or in its drafter file.
   auto dn = [&](const std::string& name) {
     const std::string in_file = spec.gguf ? gguf_draft_name(name) : name;
@@ -258,17 +258,7 @@ int build_dflash2(Tables& T, const DFlash2Spec& spec, const TargetSpec& target) 
     flyx_block b{};
     b.kind = FLYX_BLOCK_DFLASH2_LAYER;
     auto& y = b.dflash2_layer;
-    y.norm = T.norm(dn(p + "in_norm"), H, 0.0, eps);
-    y.post_norm = T.norm(dn(p + "post_norm"), H, 0.0, eps);
-    y.q_norm = T.norm(dn(p + "attn.q_norm"), d.head_dim, 0.0, eps);
-    y.k_norm = T.norm(dn(p + "attn.k_norm"), d.head_dim, 0.0, eps);
-    y.q = T.weight(dn(p + "attn.q"), {q, H});
-    y.k = T.weight(dn(p + "attn.k"), {kv, H});
-    y.v = T.weight(dn(p + "attn.v"), {kv, H});
-    y.o = T.weight(dn(p + "attn.o"), {H, q});
-    y.gate = T.weight(dn(p + "mlp.gate"), {I, H});
-    y.up = T.weight(dn(p + "mlp.up"), {I, H});
-    y.down = T.weight(dn(p + "mlp.down"), {H, I});
+    bind_qwen3_layer(T, y, dn, l, H, d.n_heads, d.n_kv, d.head_dim, d.inter, eps);
     y.attn_conv_proj = T.weight(dn(p + "attn_conv.proj"), {TG2, H});
     y.attn_conv_base = T.weight(dn(p + "attn_conv.base"), {2, d.conv_taps, H});
     y.mlp_conv_proj = T.weight(dn(p + "mlp_conv.proj"), {TG2, H});
@@ -281,14 +271,7 @@ int build_dflash2(Tables& T, const DFlash2Spec& spec, const TargetSpec& target) 
   d.sel_pred = T.weight(dn("draft.sel.pred"), {target.vocab, d.sel_rank});
   d.sel_succ = T.weight(dn("draft.sel.succ"), {target.vocab, d.sel_rank});
   d.sel_hid = T.weight(dn("draft.sel.hid"), {d.sel_rank, H});
-
-  flyx_state st{};
-  st.kind = FLYX_STATE_KV;
-  st.draft = 1;
-  st.layers = layers;
-  st.n_kv = d.n_kv;
-  st.head_dim = d.head_dim;
-  d.kv = T.state(st);
+  d.kv = draft_kv_state(T, layers, d.n_kv, d.head_dim);
   flyx_block b{};
   b.kind = FLYX_BLOCK_DFLASH2;
   b.dflash2 = d;

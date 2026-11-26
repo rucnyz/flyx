@@ -133,7 +133,8 @@ void test_dspine_walk(int H, int C, int R, int k, int n) {
   CK(cudaMemcpy(dcand, cand.data(), cand.size() * 4, cudaMemcpyHostToDevice));
   bf16* dW = up_bf16(W);
   float *dnw = up(nw), *dbefore = up(before), *dg = up(g), *drms = up(rms);
-  float *dheads = dev<float>(size_t(n) * k * H), *dbase = dev<float>(size_t(n) * k), *dtg = dev<float>(size_t(n) * k * R);
+  float *dheads = dev<float>(size_t(n) * k * H), *dbase = dev<float>(size_t(n) * k);
+  float* dtg = dev<float>(size_t(n) * k * R);
   float *dcodes = dev<float>(size_t(senders) * C), *dsv = dev<float>(size_t(senders) * 2 * R);
   int *dpick = dev<int>(size_t(senders)), *ddrafts = dev<int>(size_t(n));
   DevParams* P = anchored(anchor);

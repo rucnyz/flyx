@@ -10,6 +10,9 @@ namespace flyx::interfaces {
 
 enum class DrafterMode { kAuto, kMtp, kDFlash2, kDSpine, kDv, kAll, kNone };
 
+// What parse_drafter_mode takes, for the messages that refuse anything else.
+inline constexpr const char* kDrafterModes = "mtp, dflash2, dspine, dv, all or none";
+
 inline bool parse_drafter_mode(std::string_view value, DrafterMode* out) {
   if (value.empty()) {
     *out = DrafterMode::kAuto;

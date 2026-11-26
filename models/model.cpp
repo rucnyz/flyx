@@ -101,7 +101,7 @@ bool choose_drafters(const ModelOptions& o, const DrafterSources& has, std::vect
   out->clear();
   interfaces::DrafterMode mode = interfaces::DrafterMode::kAuto;
   if (!interfaces::parse_drafter_mode(o.drafter, &mode))
-    return *err = "unknown drafter '" + o.drafter + "' (mtp, dflash2, dspine, dv, all or none)", false;
+    return *err = "unknown drafter '" + o.drafter + "' (" + interfaces::kDrafterModes + ")", false;
   if (!o.speculative || mode == interfaces::DrafterMode::kNone) return true;
   bool mtp = false, dflash2 = false, dspine = false, dv = false;
   switch (mode) {

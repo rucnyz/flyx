@@ -21,12 +21,12 @@ std::string node_name(const flyx_node& n, const Block* b) {
     case FLYX_NODE_TAP: return "tap";
     case FLYX_NODE_DRAFT:
       if (std::holds_alternative<DvBlock>(*b)) return "dv tree";
-      if (const auto* d = std::get_if<DFlashBlock>(b); d && d->dspine) return "dspine block";
-      return std::holds_alternative<MtpBlock>(*b) ? "mtp draft" : "dflash2 block";
+      if (const auto* d = std::get_if<DFlashBlock>(b)) return std::string(d->name()) + " block";
+      return "mtp draft";
     case FLYX_NODE_CONTEXT:
       if (std::holds_alternative<DvBlock>(*b)) return "dv canvas";
-      if (const auto* d = std::get_if<DFlashBlock>(b); d && d->dspine) return "dspine context";
-      return std::holds_alternative<MtpBlock>(*b) ? "mtp context" : "dflash2 context";
+      if (const auto* d = std::get_if<DFlashBlock>(b)) return std::string(d->name()) + " context";
+      return "mtp context";
     case FLYX_NODE_ACCEPT: return "accept";
     case FLYX_NODE_COMMIT: return "commit (fold)";
     case FLYX_NODE_GIVEN: return "given drafts";

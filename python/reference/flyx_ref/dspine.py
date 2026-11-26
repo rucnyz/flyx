@@ -119,7 +119,8 @@ class DSpine(Draft):
         for t in range(B - 1):
             r = t + 1
             e = sq * self.w("bridge.codebook")[prev]
-            m = torch.sigmoid(gq[r] + e @ self.w("bridge.pred").T + self.w("bridge.gate_bias")) * (e @ self.w("bridge.prev").T)
+            gate = torch.sigmoid(gq[r] + e @ self.w("bridge.pred").T + self.w("bridge.gate_bias"))
+            m = gate * (e @ self.w("bridge.prev").T)
             redone = raw[r] + rms[r] * (write @ m)
             sc = self.head[cand[t]] @ (redone * nw)
             prev = int(cand[t, int(torch.argmax(sc))])

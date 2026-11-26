@@ -11,6 +11,7 @@
 #include "core/modelfile/modelfile.h"
 #include "flyx/backend_abi.h"
 #include "models/drafters/dflash2.h"
+#include "models/drafters/dspine.h"
 #include "models/drafters/target.h"
 #include "models/model.h"
 
@@ -42,21 +43,18 @@ class DrafterRegistry {
 
  private:
   const DFlash2Spec& ensure_dflash2_spec(const ModelFile& file, const TargetSpec& target);
-  // The DSpine drafter's config, checked against the target (its taps returned): throws, naming the file, on one
-  // that does not fit.
-  std::vector<int> dspine_checked(const ModelFile& file, const TargetSpec& target) const;
-  const nlohmann::json& dspine_config(const ModelFile& file) const;
+  const DSpineSpec& ensure_dspine_spec(const ModelFile& file, const TargetSpec& target);
 
   DrafterSources sources_{};
   int mtp_companion_ = -1;
   int dflash2_companion_ = -1;  // the companion holding the DFlash2 drafter, -1: the model file ("draft")
   int dspine_companion_ = -1;   // the companion holding the DSpine drafter, -1: the model file ("draft")
   std::optional<DFlash2Spec> dflash2_spec_;
+  std::optional<DSpineSpec> dspine_spec_;
 
   int dflash2_block_ = -1;
   std::vector<int> dflash2_taps_;
   int dspine_block_ = -1;
-  std::vector<int> dspine_taps_;
   std::vector<int> context_blocks_;
 };
 
