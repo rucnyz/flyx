@@ -27,8 +27,8 @@ thinking off):
 |---|---:|---:|---|---|
 | `chat_short.jsonl` | 2,197 | 24 | `abd29de8b71aa54b54b3f3a6f611d768` | Short chat requests unlike GSM8K (code, explanations, stories, poems, a translation, an email, lists): where a drafter trained on math answers drafts little |
 
-`eval_sets.py` writes the sets [benchmarks](../../docs/benchmarks.md)' drafter tables (DSpine, DFlash2, MTP) ran,
-from public evaluation sets downloaded with `hf download`: the first 30 of GSM8K, MATH-500, HumanEval, MBPP and
+`eval_sets.py` writes the prompt sets of [benchmarks](../../docs/benchmarks.md) section 6 (DSpine, DFlash2, MTP)
+from public evaluation sets downloaded with `hf download` (the revisions that section names): the first 30 of GSM8K, MATH-500, HumanEval, MBPP and
 MT-Bench's first turns, as questions (`python -I bench/prompts/eval_sets.py HF_DIR OUT`), and with `--think` the
 first four as token ids with thinking on.
 
