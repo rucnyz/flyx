@@ -123,6 +123,12 @@ inline double round_f16(double v) {
   return std::fabs(r) >= 65520.0 ? std::copysign(INFINITY, v) : r;
 }
 
+// A binary16 K/V cache's value: round_f16, but the largest finite value (65504) past it instead of an infinity.
+inline double round_kv16(double v) {
+  const double r = round_f16(v);
+  return std::isinf(r) && std::isfinite(v) ? std::copysign(65504.0, v) : r;
+}
+
 // A row as the kernels of GGML block weights hold it: rounded to bf16, then
 // to binary16 over the power of two that puts the row's largest magnitude in
 // [2^15, 2^16) (from 2^-126 up: the scale stays a normal float32).  Nothing

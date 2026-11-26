@@ -105,8 +105,8 @@ __global__ void k_attn_prep(const float* qkv, int ld, int q_off, int k_off, int 
           kv.vscales(cell)[size_t(cell) * nkv + head] = vsc;
         }
       } else {
-        static_cast<kv16*>(kv.k)[at] = __float2half_rn(out);
-        static_cast<kv16*>(kv.v)[at] = __float2half_rn(vv);
+        static_cast<kv16*>(kv.k)[at] = kv16_of(out);
+        static_cast<kv16*>(kv.v)[at] = kv16_of(vv);
       }
       if (kv.kq) {  // the low-bit copy strata attention reads: rotated, quantized, packed
         // xk and xv reuse the 2*hd scratch floats (after the grid reduction they hold byte-packed codes_k/codes_v).

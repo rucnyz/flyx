@@ -356,7 +356,7 @@ __global__ void __launch_bounds__(kTopkParts * kTopMax) k_topk_merge(const float
       m2 = bv;
     }
     if (t == 0 && out < k) {
-      idx[r * k + out] = bi;
+      idx[r * k + out] = bi == INT32_MAX ? out : bi;  // no finite score left: a valid id (argmax_final's 0)
       if (val) val[r * k + out] = bv;
     }
     if (t == who) v = -INFINITY, i = INT32_MAX;
@@ -421,7 +421,7 @@ __global__ void __launch_bounds__(512) k_topk(const float* logits, int ld, int V
         m2 = sv[0];
       }
       if (out < k) {
-        idx[r * k + out] = si[0];
+        idx[r * k + out] = si[0] == INT32_MAX ? out : si[0];  // no finite score left: a valid id
         if (val) val[r * k + out] = sv[0];
       }
     }
