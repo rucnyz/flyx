@@ -26,7 +26,8 @@
 
 namespace flyx::ops {
 
-// The bridge's weights, row-major in float64: codebook [vocab, code], gate / pred / prev [rank, code], gate_bias [rank].
+// The bridge's weights, row-major in float64: codebook [vocab, code], gate / pred / prev [rank, code], gate_bias
+// [rank].
 struct DSpineBridge {
   int hidden = 0, code = 0, rank = 0;
   double eps = 0;

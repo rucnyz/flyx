@@ -90,7 +90,8 @@ json dspine_config(const json& sc) {
                    "second pass (serial_table, the last layer's write)");
     widths.push_back(second.at("head_topk").get<int64_t>());
   }
-  dspine_require(!widths.empty() && std::all_of(widths.begin(), widths.end(), [&](int64_t w) { return w == widths[0]; }),
+  dspine_require(!widths.empty() &&
+                     std::all_of(widths.begin(), widths.end(), [&](int64_t w) { return w == widths[0]; }),
                  "refinement widths (one, given at least once)");
   dspine_require(widths[0] >= 2 && widths[0] <= 16, "refinement width (2..16)");
   const json bridge = dc.value("selected_prefix_code_bridge", json());
@@ -103,7 +104,9 @@ json dspine_config(const json& sc) {
   std::vector<std::string> types(size_t(layers), "full_attention");
   if (sc.contains("layer_types") && sc["layer_types"].is_array() && !sc["layer_types"].empty())
     types = sc["layer_types"].get<std::vector<std::string>>();
-  auto all = [&](const char* t) { return std::all_of(types.begin(), types.end(), [&](const std::string& x) { return x == t; }); };
+  auto all = [&](const char* t) {
+    return std::all_of(types.begin(), types.end(), [&](const std::string& x) { return x == t; });
+  };
   int64_t window = 0;
   if (all("full_attention")) {
     dspine_require(!sc.value("use_sliding_window", false), "use_sliding_window without sliding layers");
@@ -246,28 +249,14 @@ json draft_config(const json& sc) {
   return d;
 }
 
+// A tensor's name without the "model." some checkpoints put before it.
+std::string inner_name(const std::string& name) {
+  return name.rfind("model.", 0) == 0 ? name.substr(6) : name;
+}
+
 // python/convert's _D_SKIP and _D_RULES: the drafter's tensor names as the engine knows them, or "" to leave out.
-bool canonical_as(const std::string& name, bool dspine, std::string* out);
-
-bool canonical(const std::string& name, std::string* out) {
-  return canonical_as(name, false, out);
-}
-
-// The same for a DSpine drafter (flyx_convert/dspine.py's _LAYER_RULES and _BRIDGE_NAMES): its layers' tensors as
-// DFlash2's are named, the bridge's own; "" for a tensor that only says the variant (checked by the caller), or a
-// stacked one the caller cuts (read_weight, early_read_weights, feature_write_weights).
-bool canonical_dspine(const std::string& name, std::string* out) {
-  static const std::map<std::string, std::string> bridge = {
-      {"selected_prefix_bridge.codebook", "bridge.codebook"}, {"selected_prefix_bridge.gate.weight", "bridge.gate"},
-      {"selected_prefix_bridge.gate.bias", "bridge.gate_bias"},
-      {"selected_prefix_bridge.predecessor_gate.weight", "bridge.pred"},
-      {"selected_prefix_bridge.prev.weight", "bridge.prev"}};
-  const std::string inner = name.rfind("model.", 0) == 0 ? name.substr(6) : name;
-  if (auto it = bridge.find(inner); it != bridge.end()) return *out = it->second, true;
-  return canonical_as(name, true, out);
-}
-
-bool canonical_as(const std::string& name, bool dspine, std::string* out) {
+// bare: a drafter without DFlash2's convolutions and selector (DSpine's layers), whose names they are not.
+bool canonical(const std::string& name, std::string* out, bool bare = false) {
   static const std::regex skip(R"(^(embed_tokens\.|lm_head\.|verifier_norm\.|verifier_lm_head\.|t2d|d2t|mask_embedding).*)");
   static const std::vector<std::pair<std::regex, std::string>> rules = {
       {std::regex(R"(fc\.weight)"), "fc"},
@@ -284,10 +273,10 @@ bool canonical_as(const std::string& name, bool dspine, std::string* out) {
       {std::regex(R"(candidate_selector\.successor_codebook)"), "sel.succ"},
       {std::regex(R"(candidate_selector\.hidden_projection\.weight)"), "sel.hid"},
   };
-  const std::string inner = name.rfind("model.", 0) == 0 ? name.substr(6) : name;
+  const std::string inner = inner_name(name);
   if (std::regex_match(inner, skip)) return out->clear(), true;
   for (const auto& [re, fmt] : rules) {
-    if (dspine && (fmt.find("conv") != std::string::npos || fmt.rfind("sel.", 0) == 0)) continue;
+    if (bare && (fmt.find("conv") != std::string::npos || fmt.rfind("sel.", 0) == 0)) continue;
     std::smatch m;
     if (!std::regex_match(inner, m, re)) continue;
     std::string s = m.format(fmt);
@@ -297,6 +286,19 @@ bool canonical_as(const std::string& name, bool dspine, std::string* out) {
     return true;
   }
   return false;
+}
+
+// The same for a DSpine drafter (flyx_convert/dspine.py's _LAYER_RULES and _BRIDGE_NAMES): its layers' tensors as
+// DFlash2's are named, the bridge's own; "" for a tensor that only says the variant (checked by the caller), or a
+// stacked one the caller cuts (read_weight, early_read_weights, feature_write_weights).
+bool canonical_dspine(const std::string& name, std::string* out) {
+  static const std::map<std::string, std::string> bridge = {
+      {"selected_prefix_bridge.codebook", "bridge.codebook"}, {"selected_prefix_bridge.gate.weight", "bridge.gate"},
+      {"selected_prefix_bridge.gate.bias", "bridge.gate_bias"},
+      {"selected_prefix_bridge.predecessor_gate.weight", "bridge.pred"},
+      {"selected_prefix_bridge.prev.weight", "bridge.prev"}};
+  if (auto it = bridge.find(inner_name(name)); it != bridge.end()) return *out = it->second, true;
+  return canonical(name, out, /*bare=*/true);
 }
 
 }  // namespace
@@ -353,7 +355,7 @@ bool read_drafter_dir(const std::string& dir, std::vector<std::unique_ptr<os::Ma
       const size_t data_start = 8 + size_t(hlen), data_size = size - data_start;
       for (auto it = h.begin(); it != h.end(); ++it) {
         if (it.key() == "__metadata__") continue;
-        const std::string inner = it.key().rfind("model.", 0) == 0 ? it.key().substr(6) : it.key();
+        const std::string inner = inner_name(it.key());
         // A DSpine drafter's tensors that only say its variant, its terminal projection (none: zero), and the
         // stacked ones cut below.
         const bool version = dspine && dspine_version(inner), terminal = dspine && inner == kTerminal;
@@ -390,7 +392,8 @@ bool read_drafter_dir(const std::string& dir, std::vector<std::unique_ptr<os::Ma
         };
         if (version) {
           // one integer of any width holding 1 (little-endian: its low bytes first)
-          const uint64_t width = v.dtype == FLYX_DT_I64 ? 8 : v.dtype == FLYX_DT_I32 ? 4 : v.dtype == FLYX_DT_U8 ? 1 : 0;
+          const uint64_t width =
+              v.dtype == FLYX_DT_I64 ? 8 : v.dtype == FLYX_DT_I32 ? 4 : v.dtype == FLYX_DT_U8 ? 1 : 0;
           int64_t one = 0;
           if (!width || v.nbytes != width || (std::memcpy(&one, v.data, size_t(width)), one != 1))
             return *err = dir + ": DSpine drafter: " + inner + " is not 1", false;

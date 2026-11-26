@@ -8,17 +8,25 @@
 
 #include <vector>
 
+#include "flyx/backend_abi.h"
 #include "models/drafters/target.h"
 #include "models/model.h"
 
 namespace flyx::models::drafters {
 
-// The drafter's taps (the residual stream after that many target layers), after checking the config fits the target;
-// throws on one that does not, before any tensor is bound.
-std::vector<int> dspine_taps(const nlohmann::json& d, const TargetSpec& target);
+struct DSpineSpec {
+  flyx_dspine_block block{};
+  int layers = 0;
+  double eps = 0.0;
+  std::vector<int> taps;  // 1-based layer indices (1..target.layers)
+  int companion = -1;     // -1: in the target's file; >= 0: the companion file holding it
+};
 
-// Adds the drafter's state (its context K/V), its layers and its block to the tables; returns the block.  companion:
-// the companion file that holds its tensors, -1: the model file.
-int build_dspine(Tables& T, const nlohmann::json& d, const TargetSpec& target, int companion);
+// A "draft" config of kind "dspine", checked against the target: throws on one that does not fit, before any tensor
+// is bound.
+DSpineSpec parse_dspine_json(const nlohmann::json& d, const TargetSpec& target, int companion);
+
+// Adds the drafter's state (its context K/V), its layers and its block to the tables; returns the block.
+int build_dspine(Tables& T, const DSpineSpec& spec, const TargetSpec& target);
 
 }  // namespace flyx::models::drafters

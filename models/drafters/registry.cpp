@@ -4,7 +4,6 @@
 #include <stdexcept>
 #include <string>
 
-#include "models/drafters/dspine.h"
 #include "models/gguf.h"
 
 namespace flyx::models::drafters {
@@ -78,25 +77,23 @@ const DFlash2Spec& DrafterRegistry::ensure_dflash2_spec(const ModelFile& file, c
   return *dflash2_spec_;
 }
 
-const json& DrafterRegistry::dspine_config(const ModelFile& file) const {
-  const json& hdr = file.header();
-  return dspine_companion_ < 0 ? hdr.at("draft") : hdr.at("companions").at(size_t(dspine_companion_)).at("draft");
-}
-
-std::vector<int> DrafterRegistry::dspine_checked(const ModelFile& file, const TargetSpec& target) const {
+const DSpineSpec& DrafterRegistry::ensure_dspine_spec(const ModelFile& file, const TargetSpec& target) {
+  if (dspine_spec_) return *dspine_spec_;
+  const int i = dspine_companion_;
+  if (i < 0) return dspine_spec_.emplace(parse_dspine_json(file.header().at("draft"), target, -1));
   try {
-    return dspine_taps(dspine_config(file), target);
+    dspine_spec_ = parse_dspine_json(file.header().at("companions").at(size_t(i)).at("draft"), target, i);
   } catch (const std::exception& e) {
-    if (dspine_companion_ < 0) throw;
-    throw std::runtime_error(companion_label(dspine_companion_) + e.what());
+    throw std::runtime_error(companion_label(i) + e.what());
   }
+  return *dspine_spec_;
 }
 
 void DrafterRegistry::validate_selected(const ModelFile& file, const std::vector<Drafter>& selected,
                                         const TargetSpec& target) {
   for (Drafter kind : selected) {
     if (kind == Drafter::kDFlash2) (void)ensure_dflash2_spec(file, target);
-    if (kind == Drafter::kDSpine) (void)dspine_checked(file, target);
+    if (kind == Drafter::kDSpine) (void)ensure_dspine_spec(file, target);
   }
 }
 
@@ -137,11 +134,10 @@ int DrafterRegistry::attach(Drafter kind, const ModelFile& file, Tables& T, cons
     return dflash2_block_;
   }
   if (kind == Drafter::kDSpine) {
-    dspine_taps_ = dspine_checked(file, target);
-    const json& d = dspine_config(file);
-    dspine_block_ = build_dspine(T, d, target, dspine_companion_);
+    const DSpineSpec& spec = ensure_dspine_spec(file, target);
+    dspine_block_ = build_dspine(T, spec, target);
     context_blocks_.push_back(dspine_block_);
-    if (max_drafts_out) *max_drafts_out = d.at("block").get<int>() - 1;
+    if (max_drafts_out) *max_drafts_out = spec.block.block - 1;
     return dspine_block_;
   }
   throw std::runtime_error("unsupported drafter kind in DrafterRegistry::attach");
@@ -155,7 +151,7 @@ void DrafterRegistry::emit_taps(std::vector<flyx_node>* p, int layer_1based) con
       if (after[s] == layer_1based) p->push_back({FLYX_NODE_TAP, block, int32_t(s), 0});
   };
   taps(dflash2_block_, dflash2_taps_);
-  taps(dspine_block_, dspine_taps_);
+  if (dspine_spec_) taps(dspine_block_, dspine_spec_->taps);
 }
 
 void DrafterRegistry::emit_contexts(std::vector<flyx_node>* p) const {

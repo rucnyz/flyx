@@ -185,6 +185,9 @@ struct DFlashBlock {
   DSpineBridge dspine;                        // a DSpine drafter's (sel_topk: its topk; no convs, no selector)
   int layers() const { return n_layers; }
   int ctx_width() const { return layers() * 2 * nkv * hd; }
+  // A grouped conv's coefficient columns (its taps a group of channels); 0: no convs (DSpine).
+  int conv_cols() const { return conv_taps > 0 ? conv_taps * (hidden / conv_group) : 0; }
+  const char* name() const { return dspine ? "dspine" : "dflash2"; }  // the plan's node names
 };
 
 // DV (backend_abi.h flyx_dv_block, docs/design/dv.md): `slots` canvas rows run the target's attention and MLP blocks

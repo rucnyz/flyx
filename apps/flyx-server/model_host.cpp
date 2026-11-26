@@ -159,11 +159,11 @@ bool want_from_json(const ojson& j, const EngineOptions& base, ModelHost::Want* 
     }
   }
   if (j.contains("drafter") && !j["drafter"].is_null()) {
-    if (!j["drafter"].is_string()) return *err = "\"drafter\": mtp, dflash2, dspine, dv, all or none", false;
+    if (!j["drafter"].is_string()) return *err = std::string("\"drafter\": ") + interfaces::kDrafterModes, false;
     const std::string d = j["drafter"].get<std::string>();
     interfaces::DrafterMode mode = interfaces::DrafterMode::kAuto;
     if (!interfaces::parse_drafter_mode(d, &mode))
-      return *err = "\"drafter\": mtp, dflash2, dspine, dv, all or none", false;
+      return *err = std::string("\"drafter\": ") + interfaces::kDrafterModes, false;
     out.eo.drafter = d;
   }
   if (j.contains("speculative") && !j["speculative"].is_null()) {

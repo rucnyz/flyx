@@ -495,8 +495,7 @@ void quantize_block_drafter_weights(flyx_bmodel* m, TargetQuant tq) {
   if (m->dflash_block >= 0) {
     auto& d = block<DFlashBlock>(m, m->dflash_block);
     // DSpine: no convs or selector (their Lins empty: no copy); its bridge stays bf16 (blocks.h DSpineBridge).
-    const int H = d.hidden, TG = d.conv_group ? d.conv_taps * (H / d.conv_group) : 0;
-    const int nqkv = (d.nh + 2 * d.nkv) * d.hd;
+    const int H = d.hidden, TG = d.conv_cols(), nqkv = (d.nh + 2 * d.nkv) * d.hd;
     for (int j = 0; j < d.layers(); ++j) {
       auto& l = block<DFlashLayer>(m, d.first_layer + j);
       copy(l.attn_proj, 2 * TG, H);

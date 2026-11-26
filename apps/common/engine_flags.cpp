@@ -91,8 +91,7 @@ bool engine_flag(const std::string& a, const std::function<std::string()>& value
     const std::string v = value();
     interfaces::DrafterMode mode;
     if (!interfaces::parse_drafter_mode(v, &mode))
-      std::fprintf(stderr, "error: unknown drafter '%s' (mtp, dflash2, dspine, dv, all or none)\n", v.c_str()),
-          std::exit(2);
+      std::fprintf(stderr, "error: unknown drafter '%s' (%s)\n", v.c_str(), interfaces::kDrafterModes), std::exit(2);
     eo->drafter = v;
   } else if (a == "--drafter-file") {
     eo->drafter_files.push_back(value());
