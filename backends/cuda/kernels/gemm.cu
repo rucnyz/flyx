@@ -263,9 +263,11 @@ void gemm(const float* x, int ldx, const bf16* W, int N, int K, float* y, int ld
     // Every tile of 16 rows the 1..16-row kernel's arithmetic, the weights read once (a round's: a linear's bf16
     // weights, regions/linear.cpp, and an adapter's; numerics.md R, C), or bf16 inputs (a drafting pass's:
     // deterministic).
-    if (rows <= 64 && !row_path && skinny_fits(x, ldx, W, K)) {
+    // A round's of more than 64 rows (DSpine's walk) in one launch, each 64 on the configuration of 64.
+    if ((rows <= 64 || (L.round_rows && rows <= kMtMostRows)) && !row_path && skinny_fits(x, ldx, W, K)) {
       const int fmt = L.round_rows ? kFmtBf16Rows : kFmtBf16Draft;
-      gemm_skinny_mt_cfg(pick_config(opts(L).tuning, fmt, N, K, rows), x, ldx, W, N, K, y, ldy, rows, accumulate, L);
+      gemm_skinny_mt_cfg(pick_config(opts(L).tuning, fmt, N, K, std::min(rows, 64)), x, ldx, W, N, K, y, ldy, rows,
+                         accumulate, L);
       return;
     }
     if (L.round_rows) {  // a round's: the 1..16-row choice a tile of 16 rows at a time (numerics.md: R, C)

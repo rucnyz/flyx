@@ -86,14 +86,15 @@ void test_gemm() {
 // row_gemms the row path, which tiles itself), NVFP4 weights (gemm_fp4_rows: up to four tiles a weight decode) and
 // gemm_rows called directly.  The same rows without the flag (a prefill pass: the tensor cores, bf16 inputs) differ:
 // what the tiles keep a round from.  A drafting pass's (Launch::draft: bf16 inputs on k_gemm_skinny_mt) against
-// linear_a16, every configuration of one part, the same bits run to run.
+// linear_a16, every configuration of one part, the same bits run to run.  More than 64 rows in three parts (DSpine's
+// walk: one launch, 64 a grid row): every row the bits it has alone too.
 void test_gemm_round() {
   std::printf("a round's GEMM of more than 16 rows\n");
   struct S { int N, K; };
   // MiniCPM5-1B's q|k|v and down projections, and K not a multiple of 64 (bf16 only: NVFP4's skinny kernel needs it)
   for (S s : {S{2560, 1536}, S{1536, 4608}, S{333, 96}}) {
     seed("gemm round", s.N, s.K);
-    const int most = FLYX_MAX_WIDE_ROWS;
+    const int most = 240;  // FLYX_MAX_WIDE_ROWS, and DSpine's walk past it (15 rows of 16 candidates)
     const Vec x = randv(size_t(most) * s.K), y0 = randv(size_t(most) * s.N);
     float *dx = up(x), *dy = dev<float>(size_t(most) * s.N), *d1 = dev<float>(s.N);
     bf16* dw = up_bf16(randv(size_t(s.N) * s.K, 1.0 / std::sqrt(s.K)));
@@ -158,6 +159,19 @@ void test_gemm_round() {
                     [&](int r, bool acc) {
                       gemm_fp4(dx + size_t(r) * s.K, s.K, dq, ds, drs, s.N, s.K, d1, s.N, 1, acc, TL);
                     });
+    }
+    for (int rows : {65, 100, 240}) {
+      if (s.K % 32) break;  // k_gemm_skinny_mt's spans
+      same_as_one("bf16 (the round's dispatch, one launch)", rows,
+                  [&](int n, bool acc) { gemm(dx, s.K, dw, s.N, s.K, dy, s.N, n, acc, LR); },
+                  [&](int r, bool acc) { gemm(dx + size_t(r) * s.K, s.K, dw, s.N, s.K, d1, s.N, 1, acc, TL); });
+      for (int c = 0; c < kMtConfigCount; ++c) {
+        if (kMtConfigs[c].parts != 3 || !gemm_mt_cfg_compiled(c)) continue;
+        const std::string what = "bf16 k_gemm_skinny_mt " + std::to_string(c) + ", one launch";
+        same_as_one(what.c_str(), rows,
+                    [&](int n, bool acc) { gemm_skinny_mt_cfg(c, dx, s.K, dw, s.N, s.K, dy, s.N, n, acc, TL); },
+                    [&](int r, bool acc) { gemm(dx + size_t(r) * s.K, s.K, dw, s.N, s.K, d1, s.N, 1, acc, TL); });
+      }
     }
     // A prefill pass of the same rows: the tensor cores (bf16 inputs), not the bits of a row alone.
     const int rows = 32;
