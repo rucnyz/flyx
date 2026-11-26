@@ -1,6 +1,6 @@
 // Copyright 2026 The flyx Authors. SPDX-License-Identifier: Apache-2.0
 // The Qwen3.5 family (gated delta net and gated attention layers, an MTP
-// layer, a DFlash2 drafter) as blocks and programs.  No device code here;
+// layer, a block drafter) as blocks and programs.  No device code here;
 // backends decide how each block runs.
 #pragma once
 

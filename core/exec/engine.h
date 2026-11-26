@@ -53,7 +53,7 @@ struct EngineOptions {
   // against plain decoding's and lookup's every round (docs/design/dv.md).
   std::string drafter;
   // Files with drafters' weights beside the model file: a GGUF holding only the MTP
-  // layer (unsloth ships Qwen3.8-27B's so: MTP/mtp-*.gguf), a DFlash2 drafter file (python/convert --draft
+  // layer (unsloth ships Qwen3.8-27B's so: MTP/mtp-*.gguf), a block drafter's file (python/convert --draft
   // alone).  Empty: none.
   std::vector<std::string> drafter_files;
   // Optional multimodal vision projector companion GGUF (mmproj-*.gguf). Empty: none.

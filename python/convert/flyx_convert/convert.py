@@ -46,6 +46,7 @@ from .dspine import canonical_dspine_config, check_dspine, dspine_tensors, is_ds
 from .dv import add_dv
 from .fileformat import NUMPY, Writer
 from .lora import add_lora, has_lora
+from .rules import ATTN_LAYER_KEYS, DRAFT_LAYER_RULES, DRAFT_SKIP, check_tensors, map_name
 from .tokenizer_export import export as export_tokenizer
 
 ST_DTYPES = {"BF16": "bf16", "F16": "f16", "F32": "f32", "F64": "f64", "I32": "i32", "I64": "i64", "U8": "u8",
@@ -276,15 +277,7 @@ _T_RULES = [
     (r"layers\.(\d+)\.mlp\.up_proj\.weight", "L{0}.mlp.up"),
     (r"layers\.(\d+)\.mlp\.down_proj\.weight", "L{0}.mlp.down"),
 ]
-_D_RULES = [
-    (r"fc\.weight", "fc"),
-    (r"hidden_norm\.weight", "hidden_norm"),
-    (r"norm\.weight", "norm"),
-    (r"layers\.(\d+)\.input_layernorm\.weight", "L{0}.in_norm"),
-    (r"layers\.(\d+)\.post_attention_layernorm\.weight", "L{0}.post_norm"),
-    (r"layers\.(\d+)\.self_attn\.(q|k|v|o)_proj\.weight", "L{0}.attn.{1}"),
-    (r"layers\.(\d+)\.self_attn\.(q|k)_norm\.weight", "L{0}.attn.{1}_norm"),
-    (r"layers\.(\d+)\.mlp\.(gate|up|down)_proj\.weight", "L{0}.mlp.{1}"),
+_D_RULES = DRAFT_LAYER_RULES + [
     (r"layers\.(\d+)\.attention_conv\.base_kernel", "L{0}.attn_conv.base"),
     (r"layers\.(\d+)\.attention_conv\.kernel_projection\.weight", "L{0}.attn_conv.proj"),
     (r"layers\.(\d+)\.mlp_conv\.base_kernel", "L{0}.mlp_conv.base"),
@@ -302,15 +295,8 @@ _MTP_RULES = [
 # Present in some checkpoints, intentionally not used by the engine.
 _T_SKIP = re.compile(r"^(model\.visual\.|visual\.)")
 _MTP_PREFIX = re.compile(r"^(model\.)?mtp\.")
-_D_SKIP = re.compile(r"^(embed_tokens\.|lm_head\.|verifier_norm\.|verifier_lm_head\.|t2d|d2t|mask_embedding)")
-
-
-def _map(name: str, rules) -> str | None:
-    for pat, out in rules:
-        m = re.fullmatch(pat, name)
-        if m:
-            return out.format(*m.groups())
-    return None
+_D_SKIP = DRAFT_SKIP
+_map = map_name
 
 
 def _read_config(path: str) -> dict:
@@ -507,8 +493,8 @@ def convert_draft(draft_dir: str, out: str, log=print) -> None:
               "source": {"draft": os.path.basename(os.path.normpath(draft_dir))}}
     w.write(out)
     kind = "DSpine" if draft["kind"] == "dspine" else "DFlash2"
-    log(f"wrote {out}: {len(w.entries)} entries, a {kind} drafter of {draft['layers']} layer(s), block {draft['block']}, "
-        f"taps {draft['taps']}, window {draft['window'] or 'none'}")
+    log(f"wrote {out}: {len(w.entries)} entries, a {kind} drafter of {draft['layers']} layer(s), "
+        f"block {draft['block']}, taps {draft['taps']}, window {draft['window'] or 'none'}")
 
 
 def _add_linear(w: Writer, st: SafeTensors, name: str, canon: str, cfg: dict, reorder_q: bool = True) -> None:
@@ -576,17 +562,13 @@ def _eos_ids(model_dir: str, tc: dict, added: dict) -> list[int]:
     return sorted(set(int(i) for i in ids))
 
 
-_ATTN_LAYER_KEYS = ("in_norm", "post_norm", "attn.q", "attn.k", "attn.v", "attn.o", "attn.q_norm", "attn.k_norm",
-                    "mlp.gate", "mlp.up", "mlp.down")
+_ATTN_LAYER_KEYS = ATTN_LAYER_KEYS
 _GDN_LAYER_KEYS = ("in_norm", "post_norm", "gdn.qkv", "gdn.z", "gdn.b", "gdn.a", "gdn.conv", "gdn.A_log",
                    "gdn.dt_bias", "gdn.norm", "gdn.out", "mlp.gate", "mlp.up", "mlp.down")
 _DRAFT_CONV_KEYS = ("attn_conv.base", "attn_conv.proj", "mlp_conv.base", "mlp_conv.proj")
 
 
-def _check_tensors(kind: str, need: set[str], seen: set[str]) -> None:
-    missing = need - seen
-    if missing:
-        raise ValueError(f"missing {kind} tensors: {sorted(missing)[:10]}")
+_check_tensors = check_tensors
 
 
 def _check_target(cfg, seen, qk_norm=True):

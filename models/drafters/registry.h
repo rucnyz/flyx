@@ -53,7 +53,6 @@ class DrafterRegistry {
   std::optional<DSpineSpec> dspine_spec_;
 
   int dflash2_block_ = -1;
-  std::vector<int> dflash2_taps_;
   int dspine_block_ = -1;
   std::vector<int> context_blocks_;
 };

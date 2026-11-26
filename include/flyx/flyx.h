@@ -70,7 +70,7 @@ typedef struct {
                                "nvfp4" = NVFP4 weights take NVFP4 inputs in prefill passes whatever the file says
                                (a backend that cannot compute them refuses the model) */
   const char* chat_template; /* a Jinja chat template's source, used instead of the model file's; NULL = the file's */
-  const char* drafter_file; /* drafters in files of their own: a GGUF holding the MTP layer, or a DFlash2 drafter file
+  const char* drafter_file; /* drafters in files of their own: a GGUF holding the MTP layer, or a block drafter's file
                                (python/convert --draft alone); several separated by newlines; NULL = none */
   const char* mmproj_file;  /* multimodal projector / vision encoder companion GGUF (e.g. mmproj-BF16.gguf); NULL = none */
   int32_t no_vision;        /* 1 = skip loading any vision encoder even if present in the model or companion */

@@ -114,7 +114,7 @@ bool choose_drafters(const ModelOptions& o, const DrafterSources& has, std::vect
       dflash2 = true;
       break;
     case interfaces::DrafterMode::kDSpine:
-      if (!has.dspine) return *err = "the model has no DSpine drafter", false;
+      if (!has.dspine) return *err = "the model file has no DSpine drafter", false;
       dspine = true;
       break;
     case interfaces::DrafterMode::kDv:

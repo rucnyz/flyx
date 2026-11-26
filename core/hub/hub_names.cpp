@@ -469,8 +469,8 @@ bool select(const Repo& r, const Name& name, std::vector<RepoFile>* files, std::
   if (safetensors && config)
     return *err = r.id + " is a transformers checkpoint (" +
                   (r.architectures.empty() ? std::string("its config names no architecture") : r.architectures[0]) +
-                  "): flyx reads GGUF files (a GGUF repository of it, org/name-GGUF:QUANT) and block drafters (DFlash2, "
-                  "DSpine)",
+                  "): flyx reads GGUF files (a GGUF repository of it, org/name-GGUF:QUANT) and block drafters "
+                  "(DFlash2, DSpine)",
            false;
   files->clear();
   if (flyx.size() == 1) {
@@ -481,11 +481,13 @@ bool select(const Repo& r, const Name& name, std::vector<RepoFile>* files, std::
          false;
 }
 
-bool is_drafter(const Repo& r) { return !drafter_kind(r).empty(); }
+bool is_drafter(const Repo& r) { return !drafter_kind(r.architectures).empty(); }
 
-std::string drafter_kind(const Repo& r) {
+std::string drafter_kind(const Repo& r) { return drafter_kind(r.architectures); }
+
+std::string drafter_kind(const std::vector<std::string>& architectures) {
   auto has = [&](const char* a) {
-    return std::find(r.architectures.begin(), r.architectures.end(), a) != r.architectures.end();
+    return std::find(architectures.begin(), architectures.end(), a) != architectures.end();
   };
   return has("DSpineDraftModel") ? "dspine" : has("DFlash2DraftModel") ? "dflash2" : "";
 }

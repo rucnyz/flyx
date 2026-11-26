@@ -68,9 +68,12 @@ bool read_gguf(const uint8_t* data, size_t size, const std::string& path, ModelF
 bool read_gguf(std::vector<std::unique_ptr<os::MappedFile>>* maps, const std::string& path,
                ModelFile::Contents* out, std::string* err, bool need_tokenizer = true);
 
-// A DFlash2 drafter as published (drafter_dir.cpp): a directory with its config.json and *.safetensors,
-// read as python/convert would write it into a drafter file.  The shards stay mapped in `maps`.
+// A block drafter as published (drafter_dir.cpp): a directory with its config.json and *.safetensors, read as
+// python/convert would write it into a drafter file.  The shards stay mapped in `maps`.
 bool is_drafter_dir(const std::string& path);
+// Whether a drafter's config.json is DSpine's (python/convert/flyx_convert/dspine.py's is_dspine): its architecture,
+// or, published before that name, DFlashDraftModel with a code bridge in dflash_config.
+bool is_dspine_config(const nlohmann::json& config);
 bool read_drafter_dir(const std::string& dir, std::vector<std::unique_ptr<os::MappedFile>>* maps,
                       ModelFile::Contents* out, std::string* err);
 

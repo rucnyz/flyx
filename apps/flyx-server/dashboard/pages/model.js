@@ -878,7 +878,7 @@ export function ModelPage({ active, libraryAsked, currentAsked }) {
     const renderRow = (c, sel, onToggle) => {
       const isMm = c.kind === "mmproj";
       const kindTag = isMm ? ["mmproj", "info"]
-                    : c.kind === "dflash2" ? ["DFlash2", "ok"] : c.kind === "mtp" ? ["MTP", "ok"] : ["drafter", "ok"];
+                    : [drafterLabel(c.kind) || "drafter", "ok"];
       const sub = c.path && c.path !== c.file ? c.path : "";
       return html`
         <div class=${"mrow comp" + (sel ? " sel" : "")} data-comp=${c.key} data-kind=${c.kind} role="option" aria-selected=${String(sel)}

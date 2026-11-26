@@ -37,13 +37,16 @@ void dspine_require(bool ok, const std::string& what) {
   if (!ok) throw std::runtime_error("DSpine drafter: " + what);
 }
 
-// python/convert/flyx_convert/dspine.py's is_dspine.
-bool is_dspine(const json& sc) {
+}  // namespace
+
+bool is_dspine_config(const json& sc) {
   const auto archs = sc.value("architectures", json::array());
   if (std::find(archs.begin(), archs.end(), "DSpineDraftModel") != archs.end()) return true;
   return sc.contains("dflash_config") && sc["dflash_config"].is_object() &&
          sc["dflash_config"].value("selected_prefix_code_bridge", json()).is_object();
 }
+
+namespace {
 
 bool falsy(const json& v) {
   return v.is_null() || (v.is_boolean() && !v.get<bool>()) || (v.is_number() && v.get<double>() == 0) ||
@@ -171,7 +174,7 @@ int dspine_stacked(const std::string& inner) {
 
 // python/convert's canonical_draft_config(config, target=None).
 json draft_config(const json& sc) {
-  if (is_dspine(sc)) return dspine_config(sc);
+  if (is_dspine_config(sc)) return dspine_config(sc);
   json dc, tl;
   std::vector<int64_t> taps;
   int64_t vocab, target_hidden;

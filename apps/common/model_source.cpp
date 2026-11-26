@@ -208,10 +208,10 @@ bool one(const std::string& spec, const hub::ProgressFn& progress, const std::at
   return true;
 }
 
-// What kind of drafter a file or directory given beside a model holds: a GGUF's from its header when it can be
-// read (arch "dflash" against MTP), else from its name; a .flyx file or a directory of config and safetensors,
-// the block drafter it holds (DFlash2's or DSpine's, as its header says; a file that cannot be read: DFlash2's,
-// which loading it says more of).
+// What kind of drafter a file or directory given beside a model holds: a GGUF's from its header when it can be read
+// (arch "dflash" against MTP), else from its name; a .flyx file or a directory of config and safetensors, the block
+// drafter it holds (DFlash2's or DSpine's, as its header says; a file that cannot be read: DFlash2's, which loading it
+// says more of).
 std::string drafter_kind(const std::string& path) {
   const std::string lp = lower(path);
   if (lp.ends_with(".gguf")) {
@@ -240,18 +240,36 @@ std::string model_name_of(const std::string& path, bool local) {
   return from_path(extension == ".gguf" || extension == ".flyx" ? file.stem() : file);
 }
 
+namespace {
+
+// Block drafters trained for a model, by the model they were trained on (docs/models.md), and their kinds.
+struct KnownDrafter {
+  const char* model;
+  const char* drafter;
+  const char* kind;
+};
+constexpr KnownDrafter kKnown[] = {
+    {"Qwen/Qwen3.8-27B", "z-lab/Qwen3.8-27B-DFlash2", "dflash2"},
+    {"Qwen/Qwen3.8-27B", "tencent/Qwen3.8-27B-DSpine-b16", "dspine"},
+    {"Qwen/Qwen3.5-4B", "vllm-project/Qwen3.5-4B-DFlash2", "dflash2"},
+    {"Qwen/Qwen3-8B", "tencent/Qwen3-8B-DSpine-b16", "dspine"},
+};
+
+std::string known_kind(const std::string& drafter) {
+  for (const KnownDrafter& k : kKnown)
+    if (drafter == k.drafter) return k.kind;
+  return "";
+}
+
+std::string drafter_label(const std::string& kind) { return kind == "dspine" ? "DSpine" : "DFlash2"; }
+
+}  // namespace
+
 std::vector<std::string> known_drafters(const std::vector<std::string>& base_models) {
-  // Block drafters trained for a model, by the model they were trained on (docs/models.md).
-  static const std::pair<const char*, const char*> kKnown[] = {
-      {"Qwen/Qwen3.8-27B", "z-lab/Qwen3.8-27B-DFlash2"},
-      {"Qwen/Qwen3.8-27B", "tencent/Qwen3.8-27B-DSpine-b16"},
-      {"Qwen/Qwen3.5-4B", "vllm-project/Qwen3.5-4B-DFlash2"},
-      {"Qwen/Qwen3-8B", "tencent/Qwen3-8B-DSpine-b16"},
-  };
   std::vector<std::string> out;
   for (const std::string& b : base_models)
-    for (const auto& [model, drafter] : kKnown)
-      if (b == model) out.push_back(drafter);
+    for (const KnownDrafter& k : kKnown)
+      if (b == k.model) out.push_back(k.drafter);
   return out;
 }
 
@@ -277,10 +295,7 @@ bool fetch_model(const std::string& model, const std::vector<std::string>& draft
     std::string path;
     if (!one(d, progress, stop, &path, &drepo, err)) return false;
     out->drafters.push_back(path);
-    out->drafter_sources.push_back(
-        {drepo.id.empty() || !hub::is_drafter(drepo) ? drafter_kind(path) : hub::drafter_kind(drepo),
-         drepo.id.empty() ? path : d,
-         bytes_on_disk(path)});
+    out->drafter_sources.push_back({drafter_kind(path), drepo.id.empty() ? path : d, bytes_on_disk(path)});
   }
   if (want_vision && !mmproj.empty()) {
     hub::Repo mrepo;
@@ -313,16 +328,15 @@ bool fetch_model(const std::string& model, const std::vector<std::string>& draft
     out->drafter_sources.push_back({"mtp", repo.id + "/" + mtp->path, bytes_on_disk(paths[0])});
     out->notes.push_back("the MTP layer from " + repo.id + "/" + mtp->path + " (the model's file has none)");
   }
-  // A model takes one block drafter: beside one given, none of either kind is suggested.
+  // A model takes one block drafter: beside one given, none is suggested.
   bool block_given = false;
   for (const DrafterSource& s : out->drafter_sources) block_given = block_given || s.kind != "mtp";
   for (const std::string& k : known_drafters(repo.base_models)) {
     bool given = block_given;
     for (const std::string& d : drafters) given = given || d.rfind(k, 0) == 0;
     if (given) continue;
-    const std::string kind = k.find("DSpine") != std::string::npos ? "dspine" : "dflash2";
-    out->notes.push_back(std::string("a ") + (kind == "dspine" ? "DSpine" : "DFlash2") +
-                         " drafter is published for this model: --drafter-file " + k);
+    const std::string kind = known_kind(k);
+    out->notes.push_back("a " + drafter_label(kind) + " drafter is published for this model: --drafter-file " + k);
     // Its size where the cache has it; the Hub is not asked for a suggestion.
     std::optional<uint64_t> size;
     hub::Repo cached;

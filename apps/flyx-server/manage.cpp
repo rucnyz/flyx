@@ -305,7 +305,7 @@ ojson repo_json(const hub::Repo& r) {
   if (const hub::RepoFile* f = hub::mmproj_file(r))
     mmproj = {{"path", f->path}, {"size", f->size}, {"cached", on_disk(snap + f->path)}};
   for (const hub::CompanionFile& c : hub::companion_files(r)) push_comp(c.file, c.kind, c.is_default);
-  // A DFlash2 drafter's directory: config.json naming the architecture, and safetensors; no GGUF.
+  // A block drafter's directory: config.json naming the architecture, and safetensors; no GGUF.
   uint64_t weights = 0;
   bool config = false;
   for (const hub::RepoFile& f : r.files) {
@@ -427,9 +427,10 @@ void add_manage_routes(httplib::Server& http, Server* s) {
         for (const auto& f : found) seen_ids.insert(f.id);
         std::string low = asked;
         for (char& c : low) c = char(std::tolower(static_cast<unsigned char>(c)));
-        const bool drafter_query = low.find("dflash") != std::string::npos ||
+        const bool drafter_query = low.find("dflash") != std::string::npos || low.find("dspine") != std::string::npos ||
                                    low.find("drafter") != std::string::npos || low.find("mtp") != std::string::npos;
-        // Include safetensors DFlash2 drafter repos (which filter=gguf omits) when searching drafters or when no GGUF matches.
+        // Include block drafters' safetensors repos (which filter=gguf omits) when searching drafters or when no GGUF
+        // matches.
         if (found.empty() || drafter_query) {
           std::vector<hub::Found> extra;
           std::string e2;

@@ -265,7 +265,7 @@ std::vector<flyx_node> Llama::prefill_program() const {
   return p;
 }
 
-// Plain decoding, a round of given drafts, a DFlash2 round, or DV's round or warm-up (width 0; models/dv.h).
+// Plain decoding, a round of given drafts, a block drafter's round, or DV's round or warm-up (width 0; models/dv.h).
 // Only DV's rounds run its canvas: a round of another kind leaves it behind, and DV's next round starts it over.
 std::vector<flyx_node> Llama::round_program(int width, int d, bool given) const {
   if (!given && d >= 0 && drafters_.at(size_t(d)).kind == Drafter::kDv) {

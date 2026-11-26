@@ -12,29 +12,17 @@ token's code, no terminal write, no convolutions; anything else is refused, neve
 """
 from __future__ import annotations
 
-import re
-
 import numpy as np
+
+from .rules import ATTN_LAYER_KEYS, DRAFT_LAYER_RULES, DRAFT_SKIP, check_tensors, map_name
 
 BRIDGE = "selected_prefix_bridge."
 # Tensors that only say which variant the checkpoint is: each must hold 1.
 VERSIONS = ("draft_block_causal_version", "last_write_refine_version", BRIDGE + "independent_write_version",
             BRIDGE + "terminal_disabled_version")
-_LAYER_RULES = [
-    (r"fc\.weight", "fc"),
-    (r"hidden_norm\.weight", "hidden_norm"),
-    (r"norm\.weight", "norm"),
-    (r"layers\.(\d+)\.input_layernorm\.weight", "L{0}.in_norm"),
-    (r"layers\.(\d+)\.post_attention_layernorm\.weight", "L{0}.post_norm"),
-    (r"layers\.(\d+)\.self_attn\.(q|k|v|o)_proj\.weight", "L{0}.attn.{1}"),
-    (r"layers\.(\d+)\.self_attn\.(q|k)_norm\.weight", "L{0}.attn.{1}_norm"),
-    (r"layers\.(\d+)\.mlp\.(gate|up|down)_proj\.weight", "L{0}.mlp.{1}"),
-]
 _BRIDGE_NAMES = {"codebook": "bridge.codebook", "gate.weight": "bridge.gate", "gate.bias": "bridge.gate_bias",
                  "predecessor_gate.weight": "bridge.pred", "prev.weight": "bridge.prev"}
-_SKIP = re.compile(r"^(embed_tokens\.|lm_head\.|verifier_norm\.|verifier_lm_head\.|t2d|d2t|mask_embedding)")
-LAYER_KEYS = ("in_norm", "post_norm", "attn.q", "attn.k", "attn.v", "attn.o", "attn.q_norm", "attn.k_norm",
-              "mlp.gate", "mlp.up", "mlp.down", "bridge.read", "bridge.write")
+LAYER_KEYS = ATTN_LAYER_KEYS + ("bridge.read", "bridge.write")
 
 
 def is_dspine(sc: dict) -> bool:
@@ -124,14 +112,6 @@ def canonical_dspine_config(sc: dict, target: dict | None) -> dict:
     }
 
 
-def _map(name: str) -> str | None:
-    for pat, out in _LAYER_RULES:
-        m = re.fullmatch(pat, name)
-        if m:
-            return out.format(*m.groups())
-    return None
-
-
 def dspine_tensors(names, read, d: dict, log):
     """(name, dtype, array) of the engine's tensors, from the checkpoint's `names` read by read(name) -> (array,
     dtype); its version tensors checked, and the terminal projection it does not use checked to be zero."""
@@ -139,7 +119,7 @@ def dspine_tensors(names, read, d: dict, log):
     out = []
     for name in names:
         inner = name[len("model."):] if name.startswith("model.") else name
-        if _SKIP.match(inner):
+        if DRAFT_SKIP.match(inner):
             log(f"draft: ignoring {name} (the engine uses the target's embedding and head)")
             continue
         if inner in VERSIONS:
@@ -166,7 +146,7 @@ def dspine_tensors(names, read, d: dict, log):
             else:
                 raise ValueError(f"unknown DSpine bridge tensor {name!r}")
             continue
-        canon = _map(inner)
+        canon = map_name(inner, DRAFT_LAYER_RULES)
         if canon is None:
             raise ValueError(f"unknown draft tensor {name!r}")
         arr, dt = read(name)
@@ -178,6 +158,4 @@ def check_dspine(d: dict, seen: set[str]) -> None:
     need = {"fc", "hidden_norm", "norm", *_BRIDGE_NAMES.values()}
     for j in range(d["layers"]):
         need |= {f"L{j}.{n}" for n in LAYER_KEYS}
-    missing = need - seen
-    if missing:
-        raise ValueError(f"missing draft tensors: {sorted(missing)[:10]}")
+    check_tensors("draft", need, seen)

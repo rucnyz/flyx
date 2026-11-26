@@ -31,7 +31,7 @@ models/               Architecture descriptions (blocks, weights, state) and Pro
                       Llama), vision/ (VisionAdapter preprocessing, smart-resize, 3D MRoPE positions), gguf.h
   drafters/           Drafters the architectures share: DFlash2 from a .flyx file, its authors' directory or a
                       dflash GGUF (dflash2.cpp), DSpine from a .flyx file or its authors' directory (dspine.cpp),
-                      their shared Qwen3 layers and context K/V (trunk.h), claimed, attached and given their
+                      their shared Qwen3 layers and context K/V (qwen3_layer.h), claimed, attached and given their
                       program nodes by registry.cpp
   formats/            Bidirectional chat formats: detection, reply parsing (tags/calls), XGrammar structural tags,
                       and byte-identical native renderers (qwen35.cpp)

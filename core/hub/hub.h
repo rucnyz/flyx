@@ -46,7 +46,7 @@ struct Repo {
   std::string id, revision, commit;
   std::vector<RepoFile> files;
   std::vector<std::string> base_models;  // what its model card says it was made from
-  std::vector<std::string> architectures;  // its config.json's (a transformers checkpoint, a DFlash2 drafter)
+  std::vector<std::string> architectures;  // its config.json's (a transformers checkpoint, a block drafter)
   RepoInfo info;
   bool from_cache = false;               // the Hub was not asked (offline) or not reached
 };
@@ -65,7 +65,7 @@ struct Found {
   std::string pipeline;
   std::string architecture;      // GGUF general.architecture from expand[]=gguf, empty when absent
   bool gated = false;
-  bool is_drafter = false;       // DFlash2 safetensors drafter or GGUF dflash drafter
+  bool is_drafter = false;       // a block drafter's safetensors (drafter_kind) or a GGUF dflash drafter
 };
 // The Hub's repositories holding GGUF files (when `gguf_only` is true) whose names match `query` (every one when it is
 // empty), at most `limit`, ordered by `sort`: "trending", "downloads", "likes", "updated" or "created", the most first.
@@ -115,10 +115,11 @@ bool split_gguf_name(const std::string& file_name);
 // names one.
 std::string quant_in_name(const std::string& file_name);
 
-// Whether the repository holds a block drafter (its config's architecture: DFlash2DraftModel, DSpineDraftModel), not
-// a transformers model; and which ("dflash2", "dspine"; "" none).
+// Whether the repository holds a block drafter, not a transformers model; and which, from its config's architectures
+// (DFlash2DraftModel: "dflash2", DSpineDraftModel: "dspine"; "" none).
 bool is_drafter(const Repo& r);
 std::string drafter_kind(const Repo& r);
+std::string drafter_kind(const std::vector<std::string>& architectures);
 // The files `name` asks for: the GGUF of its quant (or the repository's only one), else a block drafter's
 // config.json and safetensors, else the repository's only .flyx file.
 bool select(const Repo& r, const Name& name, std::vector<RepoFile>* files, std::string* err);

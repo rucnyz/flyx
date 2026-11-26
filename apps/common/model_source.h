@@ -45,7 +45,7 @@ bool fetch_model(const std::string& model, const std::vector<std::string>& draft
 // Whether `eo` drafts with the MTP layer when the model has one (not --no-spec, not --drafter dflash2 or none).
 bool wants_mtp(const EngineOptions& eo);
 
-// DFlash2 drafters published for models made from these base models (a model card's base_model), by repository.
+// Block drafters published for models made from these base models (a model card's base_model), by repository.
 std::vector<std::string> known_drafters(const std::vector<std::string>& base_models);
 
 // Throttled Hub fetch progress logger writing to stderr, optionally forwarding every tick to `hook`.

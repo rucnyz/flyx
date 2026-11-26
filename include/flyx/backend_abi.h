@@ -39,6 +39,7 @@ extern "C" {
 #define FLYX_BACKEND_EXPORT __attribute__((visibility("default")))
 #endif
 #define FLYX_MAX_ROWS 16       /* rows in one round: the anchor plus up to 15 drafts */
+#define FLYX_DSPINE_MAX_TOPK 16 /* the head's candidates DSpine's walk scores a row, at most (ABI 45) */
 /* Rows of a round whose drafts are given (a lookup round, ABI 36), where the backend lowers such plans: a copy of
  * the context verified up to 63 drafts at once.  A round result holds this many tokens. */
 #define FLYX_MAX_WIDE_ROWS 64
@@ -288,8 +289,8 @@ typedef enum {
   FLYX_BLOCK_VIT_ATTN = 12,    /* ABI 44: bidirectional ViT self-attention */
   FLYX_BLOCK_VIT_MLP = 13,     /* ABI 44: ViT FFN (2-layer standard or 3-layer gated) */
   FLYX_BLOCK_VISION_MERGE = 14, /* ABI 44: spatial merge/pool + optional norm + 1/2-layer projector */
-  FLYX_BLOCK_DSPINE = 15,      /* ABI 45 */
-  FLYX_BLOCK_DSPINE_LAYER = 16 /* ABI 45 */
+  FLYX_BLOCK_DSPINE = 15,       /* ABI 45: DSpine, a block drafter whose rows pass a code bridge's message on */
+  FLYX_BLOCK_DSPINE_LAYER = 16  /* ABI 45: a DSpine layer: a Qwen3 layer, then its bridge's read and write */
 } flyx_block_kind;
 
 /* Token rows -> residual rows: x = table[token]. */
@@ -613,8 +614,8 @@ typedef struct {
     flyx_vit_attn_block vit_attn;         /* ABI 44 */
     flyx_vit_mlp_block vit_mlp;           /* ABI 44 */
     flyx_vision_merge_block vision_merge; /* ABI 44 */
-    flyx_dspine_block dspine;          /* ABI 45 */
-    flyx_dspine_layer_block dspine_layer;  /* ABI 45 */
+    flyx_dspine_block dspine;             /* ABI 45 */
+    flyx_dspine_layer_block dspine_layer; /* ABI 45 */
   };
 } flyx_block;
 

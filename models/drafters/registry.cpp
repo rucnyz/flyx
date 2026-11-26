@@ -128,7 +128,6 @@ int DrafterRegistry::attach(Drafter kind, const ModelFile& file, Tables& T, cons
   if (kind == Drafter::kDFlash2) {
     const DFlash2Spec& spec = ensure_dflash2_spec(file, target);
     dflash2_block_ = build_dflash2(T, spec, target);
-    dflash2_taps_ = spec.taps;
     context_blocks_.push_back(dflash2_block_);
     if (max_drafts_out) *max_drafts_out = spec.block.block - 1;
     return dflash2_block_;
@@ -150,7 +149,7 @@ void DrafterRegistry::emit_taps(std::vector<flyx_node>* p, int layer_1based) con
     for (size_t s = 0; s < after.size(); ++s)
       if (after[s] == layer_1based) p->push_back({FLYX_NODE_TAP, block, int32_t(s), 0});
   };
-  taps(dflash2_block_, dflash2_taps_);
+  if (dflash2_spec_) taps(dflash2_block_, dflash2_spec_->taps);
   if (dspine_spec_) taps(dspine_block_, dspine_spec_->taps);
 }
 

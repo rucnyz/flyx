@@ -10,8 +10,8 @@
 
 namespace flyx::models::drafters {
 
-// Layer j's norms and projections into y (a flyx_dflash2_layer or flyx_dspine_layer).  dn: a drafter tensor's name in
-// its file, from the name python/convert gives it.
+// Layer j's norms and projections into y (a flyx_dflash2_layer_block or flyx_dspine_layer_block).  dn: a drafter
+// tensor's name in its file, from the name python/convert gives it.
 template <class Layer, class Name>
 void bind_qwen3_layer(Tables& T, Layer& y, const Name& dn, int j, int hidden, int n_heads, int n_kv, int head_dim,
                       int inter, double eps) {

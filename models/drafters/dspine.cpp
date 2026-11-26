@@ -5,12 +5,14 @@
 #include "models/drafters/dspine.h"
 
 #include <climits>
+#include <cmath>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
 
 #include "core/modelfile/modelfile.h"
-#include "models/drafters/trunk.h"
+#include "models/drafters/dflash2.h"
+#include "models/drafters/qwen3_layer.h"
 
 namespace flyx::models::drafters {
 namespace {
@@ -21,30 +23,25 @@ void expect(bool ok, const std::string& what) {
   if (!ok) throw std::runtime_error("DSpine drafter: " + what);
 }
 
-int whole(const json& j, const char* key) {
-  const int64_t v = j.at(key).get<int64_t>();
-  expect(v >= INT_MIN && v <= INT_MAX, std::string(key) + " out of range");
-  return int(v);
-}
-
 }  // namespace
 
 DSpineSpec parse_dspine_json(const json& d, const TargetSpec& t, int companion) {
   expect(d.value("kind", "") == "dspine", "a config of another kind");
+  check_config_target(d, t);
   DSpineSpec spec{};
   spec.companion = companion;
   flyx_dspine_block& b = spec.block;
-  b.hidden = whole(d, "hidden");
-  spec.layers = whole(d, "layers");
-  b.n_heads = whole(d, "n_heads");
-  b.n_kv = whole(d, "n_kv");
-  b.head_dim = whole(d, "head_dim");
-  b.inter = whole(d, "inter");
-  b.block = whole(d, "block");
-  b.mask_token = whole(d, "mask_token");
-  b.code = whole(d, "code");
-  b.rank = whole(d, "rank");
-  b.topk = whole(d, "topk");
+  b.hidden = config_int(d, "hidden", "DSpine");
+  spec.layers = config_int(d, "layers", "DSpine");
+  b.n_heads = config_int(d, "n_heads", "DSpine");
+  b.n_kv = config_int(d, "n_kv", "DSpine");
+  b.head_dim = config_int(d, "head_dim", "DSpine");
+  b.inter = config_int(d, "inter", "DSpine");
+  b.block = config_int(d, "block", "DSpine");
+  b.mask_token = config_int(d, "mask_token", "DSpine");
+  b.code = config_int(d, "code", "DSpine");
+  b.rank = config_int(d, "rank", "DSpine");
+  b.topk = config_int(d, "topk", "DSpine");
   const int64_t win = d.value("window", int64_t(0));
   expect(win >= 0 && win <= INT_MAX, "window out of range");
   b.window = int32_t(win);
@@ -57,23 +54,17 @@ DSpineSpec parse_dspine_json(const json& d, const TargetSpec& t, int companion) 
   expect(b.hidden == t.hidden, "made for a target of width " + std::to_string(b.hidden) + ", not " +
                                    std::to_string(t.hidden));
   expect(b.block >= 2 && b.block <= FLYX_MAX_ROWS, "block size outside 2.." + std::to_string(FLYX_MAX_ROWS));
-  expect(b.topk >= 2 && b.topk <= 16, "the walk's candidates outside 2..16");
+  expect(b.topk >= 2 && b.topk <= FLYX_DSPINE_MAX_TOPK,
+         "the walk's candidates outside 2.." + std::to_string(FLYX_DSPINE_MAX_TOPK));
   expect(b.hidden > 0 && b.hidden <= kMaxWidth && layers > 0 && layers <= kMaxLayers && b.n_heads > 0 &&
              b.n_heads <= kMaxHeads && b.n_kv > 0 && b.n_heads % b.n_kv == 0 && b.head_dim > 0 &&
              b.head_dim % 2 == 0 && b.head_dim <= kMaxHeadDim && b.inter > 0 && b.inter <= kMaxWidth &&
              b.code > 0 && b.code <= kMaxWidth && b.rank > 0 && b.rank <= kMaxWidth && b.mask_token >= 0 &&
-             b.mask_token < t.vocab && b.topk <= t.vocab && eps > 0 && b.bridge_eps > 0 && b.theta > 0,
+             b.mask_token < t.vocab && b.topk <= t.vocab && eps > 0 && std::isfinite(eps) && b.bridge_eps > 0 &&
+             std::isfinite(b.bridge_eps) && b.theta > 0 && std::isfinite(b.theta),
          "invalid dimensions");
   const int64_t ctx = int64_t(2) * layers * b.n_kv * b.head_dim, qkv = int64_t(b.n_heads + 2 * b.n_kv) * b.head_dim;
   expect(ctx <= INT_MAX && qkv <= INT_MAX && int64_t(3) * b.rank <= INT_MAX, "dimensions too large");
-  // What it was made for, where it says.
-  const json target = d.value("target", json::object());
-  expect(target.value("vocab", t.vocab) == t.vocab, "made for another vocabulary");
-  if (target.contains("layers") && !target["layers"].is_null()) {  // null: the checkpoint did not say
-    const int made_for = target["layers"].get<int>();
-    expect(made_for == t.layers,
-           "made for a target of " + std::to_string(made_for) + " layers, not " + std::to_string(t.layers));
-  }
   for (const auto& v : d.at("taps")) {
     const int64_t x = v.get<int64_t>();
     expect(x >= 1 && x <= t.layers, "a tap after layer " + std::to_string(x) + " of " + std::to_string(t.layers));

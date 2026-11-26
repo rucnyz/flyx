@@ -8,6 +8,7 @@
 // a GGUF file's own names are mapped from those, as an architecture's are (models/gguf.h).
 #pragma once
 
+#include <string>
 #include <vector>
 
 #include "core/modelfile/modelfile.h"
@@ -35,6 +36,13 @@ bool is_dflash_companion(const nlohmann::json& header);
 // layer count where the drafter names one).  A drafter given beside another model is refused whether or not it is
 // chosen; the rest of its config is read only when it drafts (parse_dflash2_*, parse_dspine_json).
 void check_made_for(const nlohmann::json& header, const TargetSpec& target);
+
+// A drafter config's integer `key`: a whole number in int's range, else "invalid <drafter> drafter config".
+int config_int(const nlohmann::json& j, const char* key, const std::string& drafter);
+
+// Throws unless a block drafter's canonical config ("draft") is of a kind this build reads and was made for this target
+// where it says what it was made for (its width, vocabulary and layer count).
+void check_config_target(const nlohmann::json& draft, const TargetSpec& target);
 
 // Parse and validate a DFlash2 spec from canonical JSON ("draft" section in .flyx or drafter_dir).
 DFlash2Spec parse_dflash2_json(const nlohmann::json& j, const TargetSpec& target, int companion);

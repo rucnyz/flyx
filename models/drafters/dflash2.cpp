@@ -8,7 +8,7 @@
 #include <string>
 #include <string_view>
 
-#include "models/drafters/trunk.h"
+#include "models/drafters/qwen3_layer.h"
 #include "models/gguf.h"
 
 namespace flyx::models::drafters {
@@ -16,30 +16,9 @@ namespace {
 
 using nlohmann::json;
 
-int req_int(const json& j, const char* key) {
-  const auto& v = j.at(key);
-  if (!v.is_number_integer()) throw std::runtime_error("invalid DFlash2 drafter config");
-  const int64_t n = v.get<int64_t>();
-  if (n < INT_MIN || n > INT_MAX) throw std::runtime_error("invalid DFlash2 drafter config");
-  return int(n);
-}
-
 std::string mismatch_msg(const TargetSpec& target) {
   return "a drafter made for another model (this one: width " + std::to_string(target.hidden) + ", vocabulary " +
          std::to_string(target.vocab) + ", " + std::to_string(target.layers) + " layers)";
-}
-
-// A canonical config ("draft"): a block drafter (DFlash2 or DSpine, models/drafters/dspine.h), made for this target
-// where it says what it was made for.
-void check_json_target(const json& j, const TargetSpec& target) {
-  const std::string kind = j.value("kind", "");
-  if (kind != "dflash2" && kind != "dspine") throw std::runtime_error(mismatch_msg(target));
-  if (!j.contains("target") || !j["target"].is_object()) return;
-  const json& t = j["target"];
-  const bool layers_ok = !t.contains("layers") || t["layers"].is_null() || t["layers"].get<int>() == target.layers;
-  if (t.value("hidden", target.hidden) != target.hidden || t.value("vocab", target.vocab) != target.vocab ||
-      !layers_ok)
-    throw std::runtime_error(mismatch_msg(target));
 }
 
 // An arch "dflash" GGUF header: the drafter reads the target's embedding and head, so its width is the target's.
@@ -97,6 +76,27 @@ void validate_dflash2_spec(DFlash2Spec* spec, const TargetSpec& target) {
 
 }  // namespace
 
+int config_int(const json& j, const char* key, const std::string& drafter) {
+  const auto& v = j.at(key);
+  if (!v.is_number_integer()) throw std::runtime_error("invalid " + drafter + " drafter config");
+  const int64_t n = v.get<int64_t>();
+  if (n < INT_MIN || n > INT_MAX) throw std::runtime_error("invalid " + drafter + " drafter config");
+  return int(n);
+}
+
+// A canonical config ("draft"): a block drafter (DFlash2 or DSpine, models/drafters/dspine.h), made for this target
+// where it says what it was made for.
+void check_config_target(const json& j, const TargetSpec& target) {
+  const std::string kind = j.value("kind", "");
+  if (kind != "dflash2" && kind != "dspine") throw std::runtime_error(mismatch_msg(target));
+  if (!j.contains("target") || !j["target"].is_object()) return;
+  const json& t = j["target"];
+  const bool layers_ok = !t.contains("layers") || t["layers"].is_null() || t["layers"].get<int>() == target.layers;
+  if (t.value("hidden", target.hidden) != target.hidden || t.value("vocab", target.vocab) != target.vocab ||
+      !layers_ok)
+    throw std::runtime_error(mismatch_msg(target));
+}
+
 bool is_dflash_companion(const json& header) {
   if (!header.is_object()) return false;
   if (header.value("kind", "") == "drafter" && header.contains("draft") && header["draft"].is_object()) return true;
@@ -105,34 +105,34 @@ bool is_dflash_companion(const json& header) {
 
 void check_made_for(const json& header, const TargetSpec& target) {
   if (GgufMeta::is_header(header)) check_gguf_target(GgufMeta(header), target);
-  else check_json_target(header.at("draft"), target);
+  else check_config_target(header.at("draft"), target);
 }
 
 DFlash2Spec parse_dflash2_json(const json& j, const TargetSpec& target, int companion) {
-  check_json_target(j, target);
+  check_config_target(j, target);
   if (j.value("kind", "") != "dflash2") throw std::runtime_error("not a DFlash2 drafter config");
   DFlash2Spec spec{};
   spec.gguf = false;
   spec.companion = companion;
   flyx_dflash2_block& d = spec.block;
-  d.hidden = req_int(j, "hidden");
-  spec.layers = req_int(j, "layers");
-  d.n_heads = req_int(j, "n_heads");
-  d.n_kv = req_int(j, "n_kv");
-  d.head_dim = req_int(j, "head_dim");
-  d.inter = req_int(j, "inter");
-  d.block = req_int(j, "block");
-  d.mask_token = req_int(j, "mask_token");
+  d.hidden = config_int(j, "hidden", "DFlash2");
+  spec.layers = config_int(j, "layers", "DFlash2");
+  d.n_heads = config_int(j, "n_heads", "DFlash2");
+  d.n_kv = config_int(j, "n_kv", "DFlash2");
+  d.head_dim = config_int(j, "head_dim", "DFlash2");
+  d.inter = config_int(j, "inter", "DFlash2");
+  d.block = config_int(j, "block", "DFlash2");
+  d.mask_token = config_int(j, "mask_token", "DFlash2");
   const auto raw_taps = j.at("taps").get<std::vector<int64_t>>();
   spec.taps.reserve(raw_taps.size());
   for (int64_t t : raw_taps) {
     if (t < 1 || t > target.layers) throw std::runtime_error("DFlash2 tap after layer " + std::to_string(t));
     spec.taps.push_back(int(t));
   }
-  d.conv_taps = req_int(j, "conv_taps");
-  d.conv_group = req_int(j, "conv_group");
-  d.sel_rank = req_int(j, "sel_rank");
-  d.sel_topk = req_int(j, "sel_topk");
+  d.conv_taps = config_int(j, "conv_taps", "DFlash2");
+  d.conv_group = config_int(j, "conv_group", "DFlash2");
+  d.sel_rank = config_int(j, "sel_rank", "DFlash2");
+  d.sel_topk = config_int(j, "sel_topk", "DFlash2");
   d.theta = j.at("rope_theta").get<double>();
   const int64_t win = j.value("window", int64_t(0));
   if (win < 0 || win > INT_MAX) throw std::runtime_error("DFlash2 window out of range");

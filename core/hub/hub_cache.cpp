@@ -7,6 +7,7 @@
 #include <fstream>
 #include <mutex>
 
+#include "core/modelfile/readers.h"
 #include "core/os/env.h"
 #include "core/os/os.h"
 #include "core/os/path.h"
@@ -47,9 +48,8 @@ std::vector<RepoFile> snapshot_files(const fs::path& snap) {
   return files;
 }
 
-// A snapshot's config.json's architectures, if it has one.  A DSpine drafter published before its architecture had
-// that name says DFlashDraftModel; its code bridge (dflash_config.selected_prefix_code_bridge, what
-// modelfile/drafter_dir.cpp's is_dspine reads) tells it apart, and it reads as DSpineDraftModel.
+// A snapshot's config.json's architectures, if it has one; a DSpine drafter published before its architecture had that
+// name (DFlashDraftModel) reads as DSpineDraftModel, as the drafter directory reader takes it.
 std::vector<std::string> architectures_of(const fs::path& snap) {
   std::vector<std::string> out;
   std::ifstream f(snap / "config.json", std::ios::binary);
@@ -58,9 +58,7 @@ std::vector<std::string> architectures_of(const fs::path& snap) {
   if (j.is_object() && j.contains("architectures") && j["architectures"].is_array())
     for (const auto& a : j["architectures"])
       if (a.is_string()) out.push_back(a.get<std::string>());
-  const auto dc = j.is_object() ? j.find("dflash_config") : j.end();
-  if (dc != j.end() && dc->is_object() && dc->contains("selected_prefix_code_bridge") &&
-      (*dc)["selected_prefix_code_bridge"].is_object())
+  if (j.is_object() && modelfile::is_dspine_config(j))
     std::replace(out.begin(), out.end(), std::string("DFlashDraftModel"), std::string("DSpineDraftModel"));
   return out;
 }
